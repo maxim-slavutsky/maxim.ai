@@ -1,0 +1,4 @@
+interface:
+  display_name: "Runtime config updates"
+  short_description: "Propagate runtime config shape changes to every surface"
+  default_prompt: "Use $app-config-updates to propagate this runtime configuration change through every maintained surface."

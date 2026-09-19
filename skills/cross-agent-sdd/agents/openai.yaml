@@ -1,0 +1,7 @@
+interface:
+  display_name: "Cross-agent SDD"
+  short_description: "Bootstrap shared SDD governance across coding agents"
+  default_prompt: "Use $cross-agent-sdd to audit this repository and propose a safe cross-agent SDD bootstrap."
+
+policy:
+  allow_implicit_invocation: true

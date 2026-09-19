@@ -1,0 +1,4 @@
+interface:
+  display_name: "SPEC-first development"
+  short_description: "Reconcile spec, evidence, and code before edits"
+  default_prompt: "Use $spec-first to reconcile the owning specification, evidence, and implementation for this change."

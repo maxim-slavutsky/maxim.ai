@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent parity"
+  short_description: "Keep Claude Code, Codex, and Cursor harness files synchronized"
+  default_prompt: "Use $agent-parity to mirror this harness change for every enabled coding agent."
