@@ -68,16 +68,40 @@ const entries = [
 
 function help() {
   console.log(`cross-agent-sdd ${VERSION}
+One spec-driven-development policy for Claude Code, Codex, and Cursor, installed into a Git repository.
 
-Usage:
-  audit <repo> [--json]
-  plan <repo> [--profiles core,sdd,config,helm|full] [--agents all|claude,codex,cursor] [--json]
-  apply <repo> --write [--profiles ...] [--agents ...] [--merge-agents] [--allow-dirty]
-  verify <repo> [--json]
-  install-skill --scope user|project --agents all|claude,codex,cursor --write
-                [--repo <path>] [--cursor-cloud] [--force]
+Usage: node <path-to-skill>/scripts/cross-agent-sdd.mjs <command> [arguments]
 
-Mutating commands are dry-run unless --write is present.`);
+Commands
+  audit <repo> [--json]           Look at the repository and report what is already there. Changes nothing.
+  plan <repo> [options]           Show every file "apply" would create, update, keep, or refuse. Changes nothing.
+  apply <repo> --write [options]  Write the files from the plan. Without --write it is a dry run: it prints
+                                  the plan and writes nothing.
+  verify <repo> [--json]          Check that every generated file is intact, then run the repository gate
+                                  (scripts/check-sdd.mjs). Changes nothing.
+  install-skill [options] --write Copy this skill into your home folder (or one repository) so your AI tools
+                                  can find it. Without --write it only shows the target folders.
+
+Options for plan and apply
+  --profiles core,sdd,config,helm   Which file sets to install. "core,sdd" is the default and always included.
+                                    "config" adds a runtime-config propagation gate; "helm" adds Helm chart
+                                    validation. "full" means all four.
+  --agents all | claude,codex,cursor   Which AI tools to configure. Default: all three.
+  --merge-agents                    When AGENTS.md or CLAUDE.md already exists, append the managed block or the
+                                    @AGENTS.md import instead of stopping. Read those files first.
+  --allow-dirty                     Apply even if the repository has uncommitted changes. Not recommended.
+  --json                            Machine-readable output (plan, audit, verify).
+
+Options for install-skill
+  --scope user | project            "user" = your home folder (default), "project" = one repository (--repo).
+  --repo <path>                     Repository for --scope project. Default: current folder.
+  --agents all | claude,codex,cursor   Which tools get a copy. Codex and Cursor share ~/.agents/skills.
+  --cursor-cloud                    Also copy into ~/.cursor/skills (only for Cursor Cloud sync).
+  --force                           Replace a copy this tool installed earlier (upgrade).
+
+Safety
+  Every command that writes files is a dry run until you add --write.
+  A file that already exists and was not created by this tool is reported as a conflict and never overwritten.`);
 }
 
 function parseArgs(argv) {
@@ -105,11 +129,13 @@ function flag(parsed, name, fallback = null) {
   return parsed.flags.has(name) ? parsed.flags.get(name) : fallback;
 }
 
-function listOption(value, allowed, fallback) {
+function listOption(name, value, allowed, fallback) {
   if (!value) return [...fallback];
   const values = value === 'all' || value === 'full' ? [...allowed] : String(value).split(',').map((item) => item.trim());
   const invalid = values.filter((item) => !allowed.includes(item));
-  if (invalid.length) throw new Error(`unsupported value(s): ${invalid.join(', ')}`);
+  if (invalid.length) {
+    throw new Error(`--${name} does not accept "${invalid.join(', ')}". Allowed values: ${allowed.join(', ')} (comma-separated), or "all".`);
+  }
   return [...new Set(values)];
 }
 
@@ -138,7 +164,7 @@ function repoRoot(input = '.') {
   try {
     return resolve(git(candidate, ['rev-parse', '--show-toplevel']));
   } catch {
-    throw new Error(`not a Git repository: ${candidate}`);
+    throw new Error(`not a Git repository: ${candidate}. Pass the path of a folder that is inside a Git checkout.`);
   }
 }
 
@@ -155,7 +181,7 @@ function safePath(root, path) {
   const absoluteRoot = resolve(root);
   const absolute = resolve(path);
   if (absolute !== absoluteRoot && !absolute.startsWith(`${absoluteRoot}\\`) && !absolute.startsWith(`${absoluteRoot}/`)) {
-    throw new Error(`path escapes expected root: ${absolute}`);
+    throw new Error(`refusing to write outside the target folder: ${absolute}`);
   }
   return absolute;
 }
@@ -206,16 +232,16 @@ function existingConfig(root) {
   try {
     return readJson(path);
   } catch (error) {
-    throw new Error(`invalid ${CONFIG}: ${error.message}`);
+    throw new Error(`${CONFIG} is not valid JSON (${error.message}). Fix the syntax, then run the command again.`);
   }
 }
 
 function selected(parsed, root = null) {
   const current = root ? existingConfig(root) : null;
-  const profiles = listOption(flag(parsed, 'profiles'), ALL_PROFILES, current?.profiles ?? DEFAULT_PROFILES);
+  const profiles = listOption('profiles', flag(parsed, 'profiles'), ALL_PROFILES, current?.profiles ?? DEFAULT_PROFILES);
   if (!profiles.includes('core')) profiles.unshift('core');
   if (!profiles.includes('sdd')) profiles.splice(1, 0, 'sdd');
-  const agents = listOption(flag(parsed, 'agents'), ALL_AGENTS, current?.agents ?? ALL_AGENTS);
+  const agents = listOption('agents', flag(parsed, 'agents'), ALL_AGENTS, current?.agents ?? ALL_AGENTS);
   return { profiles, agents };
 }
 
@@ -252,7 +278,7 @@ function readManifest(root) {
   try {
     return readJson(path);
   } catch (error) {
-    throw new Error(`invalid ${MANIFEST}: ${error.message}`);
+    throw new Error(`${MANIFEST} is not valid JSON (${error.message}). This file records which files this tool owns; restore it from Git or fix the syntax.`);
   }
 }
 
@@ -312,7 +338,7 @@ function hookContent(root, agent) {
     try {
       current = readJson(path);
     } catch (error) {
-      throw new Error(`cannot merge invalid ${hookConfigs[agent]}: ${error.message}`);
+      throw new Error(`${hookConfigs[agent]} exists but is not valid JSON (${error.message}). Fix the syntax so the hook entry can be added next to your existing settings.`);
     }
   }
   return `${JSON.stringify(mergeHookConfig(agent, current), null, 2)}\n`;
@@ -325,7 +351,13 @@ function agentsContent(root, allowMerge) {
   const current = read(path);
   const replaced = replaceBlock(current, fragment, AGENTS_START, AGENTS_END);
   if (replaced !== null) return { action: replaced === current ? 'preserve' : 'update', content: replaced };
-  if (!allowMerge) return { action: 'conflict', content: null, reason: 'existing AGENTS.md lacks managed block' };
+  if (!allowMerge) {
+    return {
+      action: 'conflict',
+      content: null,
+      reason: 'this file already exists and has no cross-agent-sdd block. Read it, then re-run with --merge-agents to append the block at the end; your text stays as is.',
+    };
+  }
   return { action: 'merge', content: `${current.trimEnd()}\n\n${fragment}\n` };
 }
 
@@ -335,7 +367,13 @@ function claudeContent(root, allowMerge, enabled) {
   if (!existsSync(path)) return { action: 'create', content: '@AGENTS.md\n' };
   const current = read(path);
   if (/(?:^|\n)@AGENTS\.md(?:\n|$)/.test(current)) return { action: 'preserve', content: current };
-  if (!allowMerge) return { action: 'conflict', content: null, reason: 'existing CLAUDE.md does not import @AGENTS.md' };
+  if (!allowMerge) {
+    return {
+      action: 'conflict',
+      content: null,
+      reason: 'this file already exists and does not import @AGENTS.md. Read it, then re-run with --merge-agents to append the import line; your text stays as is.',
+    };
+  }
   return { action: 'merge', content: `${current.trimEnd()}\n\n@AGENTS.md\n` };
 }
 
@@ -375,7 +413,14 @@ function plan(root, profiles, agents, allowMerge = false) {
     if (record?.kind === 'generated' && record.sha256 === sha(current)) {
       actions.push({ path, action: 'update-generated', content });
     } else {
-      actions.push({ path, action: 'conflict', content: null, reason: 'existing file is unowned or locally modified' });
+      actions.push({
+        path,
+        action: 'conflict',
+        content: null,
+        reason: record
+          ? 'this tool created the file but it was edited afterwards. Keep your edits (the tool will skip it) or restore the original with "git checkout" and run apply again.'
+          : 'the file already exists and was not created by this tool. Keep your version by moving it aside, or drop the profile that ships it (--profiles).',
+      });
     }
   }
 
@@ -440,6 +485,23 @@ function audit(root) {
   };
 }
 
+function printAudit(result) {
+  const yesNo = (value) => (value ? 'yes' : 'no');
+  const ci = Object.entries(result.ci).filter(([, value]) => value).map(([name]) => name);
+  console.log(`Repository: ${result.root}`);
+  console.log(`Branch: ${result.branch ?? '<detached HEAD>'}; uncommitted changes: ${yesNo(result.dirty)}`);
+  console.log(`Already set up by this tool: ${yesNo(result.manifest)}`);
+  console.log(
+    `Existing files: AGENTS.md ${yesNo(result.agents.rootInstructions)}, CLAUDE.md ${yesNo(result.agents.claudeImport)}, ` +
+      `.claude ${yesNo(result.agents.claude)}, .codex/.agents ${yesNo(result.agents.codex)}, .cursor ${yesNo(result.agents.cursor)}`,
+  );
+  console.log(`SPEC.md files: ${result.sdd.specCount}; workflow docs under docs/workflows: ${result.sdd.workflowCount}; gate script present: ${yesNo(result.sdd.gate)}`);
+  console.log(`Config-like files (paths containing config/): ${result.configFileCount}; Helm charts: ${result.charts.length}`);
+  console.log(`Package manager: ${result.packageManager ?? 'none detected'}; CI: ${ci.length ? ci.join(', ') : 'none detected'}`);
+  console.log(`Suggested profiles: ${result.suggestedProfiles.join(', ')} (core and sdd are always installed; config and helm only when useful)`);
+  console.log('\nAudit wrote nothing. Next: run "plan <repo>" to see what apply would change.');
+}
+
 function printPlan(value, asJson) {
   if (asJson) {
     console.log(JSON.stringify({ ...value, actions: value.actions.map(({ content: _content, ...action }) => action) }, null, 2));
@@ -448,16 +510,29 @@ function printPlan(value, asJson) {
   console.log(`Repository: ${value.root}`);
   console.log(`Profiles:   ${value.profiles.join(', ')}`);
   console.log(`Agents:     ${value.agents.join(', ')}`);
+  console.log('');
   for (const action of value.actions) {
-    console.log(`${action.action.padEnd(17)} ${action.path}${action.reason ? ` - ${action.reason}` : ''}`);
+    console.log(`  ${action.action.padEnd(17)} ${action.path}`);
   }
-  const conflicts = value.actions.filter((action) => action.action === 'conflict').length;
-  console.log(`\n${conflicts ? `${conflicts} conflict(s); no apply permitted` : 'No blocking conflicts'}`);
+  console.log(
+    '\nAction words: create = new file; preserve = already correct, left alone; update = managed block refreshed; ' +
+      'update-generated = tool-owned file upgraded; merge = your file kept, tool entries added; ' +
+      'conflict = file exists and this tool does not own it, so nothing is written.',
+  );
+  const conflicts = value.actions.filter((action) => action.action === 'conflict');
+  if (!conflicts.length) {
+    console.log('\nNo conflicts. Apply can run.');
+    return;
+  }
+  console.log(`\n${conflicts.length} conflict(s). Apply writes nothing until each one is resolved:`);
+  for (const action of conflicts) console.log(`  - ${action.path}: ${action.reason}`);
 }
 
 function applyPlan(value) {
   const conflicts = value.actions.filter((action) => action.action === 'conflict');
-  if (conflicts.length) throw new Error(`cannot apply with conflicts: ${conflicts.map((item) => item.path).join(', ')}`);
+  if (conflicts.length) {
+    throw new Error(`cannot apply with conflicts: ${conflicts.map((item) => item.path).join(', ')}. The plan above explains how to resolve each one. Nothing was written.`);
+  }
 
   const rollback = [];
   try {
@@ -512,26 +587,31 @@ function applyPlan(value) {
 function verify(root) {
   const manifest = readManifest(root);
   const errors = [];
-  if (!manifest) return { ok: false, errors: [`missing ${MANIFEST}`] };
+  if (!manifest) {
+    return { ok: false, errors: [`${MANIFEST} is missing. This repository was never set up by cross-agent-sdd (or the file was deleted). Run "apply <repo> --write" first.`] };
+  }
   for (const [path, record] of Object.entries(manifest.managedFiles ?? {})) {
     const absolute = join(root, path);
     if (!existsSync(absolute)) {
-      errors.push(`missing managed file: ${path}`);
+      errors.push(`managed file is missing: ${path}. It was created by cross-agent-sdd; run "apply <repo> --write" to restore it.`);
       continue;
     }
     if (record.kind === 'generated' && sha(read(absolute)) !== record.sha256) {
-      errors.push(`managed file changed outside installer: ${path}`);
+      errors.push(`managed file changed outside installer: ${path}. Tool-owned files are not meant to be edited by hand. Restore it with "git checkout -- ${path}" or "apply --write"; if the edit is intended, keep it and expect upgrades to skip this file.`);
     }
     if (record.kind === 'managed-block') {
       const block = managedBlock(read(absolute), AGENTS_START, AGENTS_END);
-      if (!block || sha(block) !== record.sha256) errors.push(`managed AGENTS block changed: ${path}`);
+      if (!block || sha(block) !== record.sha256) {
+        errors.push(`managed AGENTS block changed: ${path}. The text between the cross-agent-sdd markers was edited or removed. Put repository-specific policy outside the markers and run "apply --write" to restore the block.`);
+      }
     }
   }
   for (const agent of manifest.agents ?? []) {
     const path = hookConfigs[agent];
-    if (!path || !existsSync(join(root, path))) errors.push(`missing ${agent} hook config`);
-    else if (!read(join(root, path)).replaceAll('\\', '/').includes('scripts/hooks/post-edit-reminder.mjs')) {
-      errors.push(`${agent} hook no longer invokes shared reminder`);
+    if (!path || !existsSync(join(root, path))) {
+      errors.push(`missing ${agent} hook config (${path ?? agent}). Run "apply <repo> --write" to recreate it.`);
+    } else if (!read(join(root, path)).replaceAll('\\', '/').includes('scripts/hooks/post-edit-reminder.mjs')) {
+      errors.push(`${agent} hook config (${path}) no longer runs scripts/hooks/post-edit-reminder.mjs. Add the hook entry back or run "apply <repo> --write".`);
     }
   }
 
@@ -540,9 +620,9 @@ function verify(root) {
   if (existsSync(gate)) {
     const result = spawnSync(process.execPath, [gate], { cwd: root, encoding: 'utf8' });
     gateResult = { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
-    if (result.status !== 0) errors.push('generated SDD gate failed');
+    if (result.status !== 0) errors.push('the repository gate (scripts/check-sdd.mjs) reported problems; see the lines above for what to fix.');
   } else {
-    errors.push('missing scripts/check-sdd.mjs');
+    errors.push('scripts/check-sdd.mjs is missing. Run "apply <repo> --write" to recreate the gate.');
   }
   return { ok: errors.length === 0, errors, gate: gateResult };
 }
@@ -553,8 +633,10 @@ function copySkill(target, force) {
   safePath(parent, target);
   if (existsSync(target)) {
     const marker = join(target, '.cross-agent-sdd-install.json');
-    if (!existsSync(marker)) throw new Error(`refusing to replace unowned skill directory: ${target}`);
-    if (!force) throw new Error(`skill already installed at ${target}; use --force for managed upgrade`);
+    if (!existsSync(marker)) {
+      throw new Error(`refusing to replace ${target}: that folder was not created by this installer. Move it aside first if you want this skill there.`);
+    }
+    if (!force) throw new Error(`the skill is already installed at ${target}. Add --force to replace it with this version.`);
   }
 
   const temporary = join(parent, `.${SKILL_NAME}-${process.pid}-${randomUUID()}.tmp`);
@@ -583,21 +665,37 @@ function copySkill(target, force) {
 
 function installSkill(parsed) {
   const scope = flag(parsed, 'scope', 'user');
-  if (!['user', 'project'].includes(scope)) throw new Error('--scope must be user or project');
-  const agents = listOption(flag(parsed, 'agents', 'all'), ALL_AGENTS, ALL_AGENTS);
+  if (!['user', 'project'].includes(scope)) {
+    throw new Error('--scope must be "user" (your home folder, available in every repository) or "project" (one repository, use --repo <path>).');
+  }
+  const agents = listOption('agents', flag(parsed, 'agents', 'all'), ALL_AGENTS, ALL_AGENTS);
   const base = scope === 'user' ? homedir() : repoRoot(flag(parsed, 'repo', '.'));
-  const targets = new Set();
+  const targets = [];
   if (agents.includes('codex') || agents.includes('cursor')) {
-    targets.add(join(base, '.agents', 'skills', SKILL_NAME));
+    targets.push({ path: join(base, '.agents', 'skills', SKILL_NAME), tools: 'Codex and Cursor' });
   }
-  if (agents.includes('claude')) targets.add(join(base, '.claude', 'skills', SKILL_NAME));
+  if (agents.includes('claude')) targets.push({ path: join(base, '.claude', 'skills', SKILL_NAME), tools: 'Claude Code' });
   if (agents.includes('cursor') && flag(parsed, 'cursor-cloud', false)) {
-    targets.add(join(base, '.cursor', 'skills', SKILL_NAME));
+    targets.push({ path: join(base, '.cursor', 'skills', SKILL_NAME), tools: 'Cursor Cloud sync' });
   }
-  const output = { scope, agents, targets: [...targets] };
-  if (!flag(parsed, 'write', false)) return { ...output, dryRun: true };
-  for (const target of targets) copySkill(target, flag(parsed, 'force', false));
-  return { ...output, dryRun: false };
+  const output = { scope, agents, targets: targets.map((target) => target.path) };
+  if (!flag(parsed, 'write', false)) return { ...output, dryRun: true, details: targets };
+  for (const target of targets) copySkill(target.path, flag(parsed, 'force', false));
+  return { ...output, dryRun: false, details: targets };
+}
+
+function printInstall(result) {
+  if (result.dryRun) {
+    console.log('install-skill dry run: nothing was copied. It would copy this skill to:');
+  } else {
+    console.log(`Installed cross-agent-sdd ${VERSION} (scope: ${result.scope}) to:`);
+  }
+  for (const target of result.details) console.log(`  ${target.path}   (${target.tools})`);
+  if (result.dryRun) {
+    console.log('Add --write to copy the files.');
+  } else {
+    console.log('Start a new session in your AI tool so it picks up the skill. Then, inside a repository, ask it to bootstrap cross-agent SDD.');
+  }
 }
 
 function main() {
@@ -612,7 +710,13 @@ function main() {
     return;
   }
   if (command === 'install-skill') {
-    console.log(JSON.stringify(installSkill(parsed), null, 2));
+    const result = installSkill(parsed);
+    if (flag(parsed, 'json', false)) {
+      const { details: _details, ...json } = result;
+      console.log(JSON.stringify(json, null, 2));
+    } else {
+      printInstall(result);
+    }
     return;
   }
 
@@ -620,13 +724,7 @@ function main() {
   if (command === 'audit') {
     const result = audit(root);
     if (flag(parsed, 'json', false)) console.log(JSON.stringify(result, null, 2));
-    else {
-      console.log(`Repository: ${result.root}`);
-      console.log(`Branch: ${result.branch ?? '<detached>'}; dirty: ${result.dirty}`);
-      console.log(`Existing specs: ${result.sdd.specCount}; workflows: ${result.sdd.workflowCount}`);
-      console.log(`Config-like files: ${result.configFileCount}; Helm charts: ${result.charts.length}`);
-      console.log(`Suggested profiles: ${result.suggestedProfiles.join(', ')}`);
-    }
+    else printAudit(result);
     return;
   }
 
@@ -634,19 +732,30 @@ function main() {
   const value = plan(root, profiles, agents, flag(parsed, 'merge-agents', false));
   if (command === 'plan') {
     printPlan(value, flag(parsed, 'json', false));
+    if (!flag(parsed, 'json', false)) console.log('\nPlan wrote nothing. Next: run "apply <repo> --write" to create these files.');
     return;
   }
   if (command === 'apply') {
     if (!flag(parsed, 'allow-dirty', false) && git(root, ['status', '--porcelain'])) {
-      throw new Error('repository is dirty; use an isolated worktree or explicitly pass --allow-dirty after review');
+      throw new Error(
+        'the repository has uncommitted changes. Commit or stash them first so you can review what this tool writes as one clean diff. To apply anyway, add --allow-dirty.',
+      );
     }
     printPlan(value, false);
     if (!flag(parsed, 'write', false)) {
-      console.log('\nDry run only; add --write after review.');
+      console.log('\nThis was a dry run: nothing was written. Re-run the same command with --write to create the files.');
       return;
     }
     applyPlan(value);
-    console.log(`\nApplied ${SKILL_NAME} ${VERSION}. Configure target-specific ownership, hooks/CI, then run verify.`);
+    console.log(`\nApplied cross-agent-sdd ${VERSION}. Next steps:
+  1. Open .agent-sdd/config.json and make sure "runtimeRoots" lists the folders that hold application code.
+  2. Run "node scripts/check-sdd.mjs" and fix what it reports. Each line says what is wrong and how to fix it.
+  3. Wire the gate into Git hooks and CI:
+       pre-commit:  node scripts/check-sdd.mjs
+       commit-msg:  node scripts/check-sdd.mjs --staged --commit-msg $1
+       CI:          node scripts/check-sdd.mjs --changed
+  4. Run "verify <repo>" to confirm every generated file is intact and the gate is green.
+  5. Commit the new files together (this tool never commits for you).`);
     return;
   }
   if (command === 'verify') {
@@ -656,12 +765,16 @@ function main() {
       if (result.gate?.stdout) console.log(result.gate.stdout);
       if (result.gate?.stderr) console.error(result.gate.stderr);
       for (const error of result.errors) console.error(`x ${error}`);
-      console.log(result.ok ? 'cross-agent-sdd verify: ok' : 'cross-agent-sdd verify: failed');
+      console.log(
+        result.ok
+          ? 'cross-agent-sdd verify: ok (generated files intact, gate green)'
+          : `cross-agent-sdd verify: failed (${result.errors.length} problem(s) listed above)`,
+      );
     }
     if (!result.ok) process.exitCode = 1;
     return;
   }
-  throw new Error(`unknown command: ${command}`);
+  throw new Error(`unknown command "${command}". Run with --help to see the available commands.`);
 }
 
 try {

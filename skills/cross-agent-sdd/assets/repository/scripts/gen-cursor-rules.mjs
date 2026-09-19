@@ -92,13 +92,16 @@ if (invokedDirectly) {
   if (process.argv.includes('--check')) {
     const problems = cursorRulesProblems();
     if (problems.length) {
-      console.error(`gen-cursor-rules: ${problems.length} problem(s); run \`node scripts/gen-cursor-rules.mjs\``);
+      console.error(
+        `gen-cursor-rules found ${problems.length} problem(s). Files under ${TARGET_DIR} are generated from ${SOURCE_DIR}; ` +
+          'run "node scripts/gen-cursor-rules.mjs" (no flags) and commit the result. Never edit .mdc files by hand.',
+      );
       for (const problem of problems) console.error(`  x ${problem}`);
       process.exit(1);
     }
-    console.log('gen-cursor-rules: ok');
+    console.log(`gen-cursor-rules: ok (${TARGET_DIR} matches ${SOURCE_DIR})`);
   } else {
     const files = writeCursorRules();
-    console.log(`gen-cursor-rules: wrote ${files.length} file(s) to ${TARGET_DIR}`);
+    console.log(`gen-cursor-rules: wrote ${files.length} file(s) to ${TARGET_DIR}. Commit them together with the ${SOURCE_DIR} change.`);
   }
 }

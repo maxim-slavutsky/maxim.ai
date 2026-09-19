@@ -7,7 +7,8 @@
  *   node scripts/check-sdd.mjs --staged --commit-msg <path>
  *   node scripts/check-sdd.mjs --changed [--base <git-ref>]
  *
- * Policy: docs/workflows/SPEC-FIRST-WORKFLOW.md, docs/workflows/AGENT-PARITY-WORKFLOW.md.
+ * Every reported line says what is wrong and how to fix it. File shapes: docs/agent-sdd/FORMAT.md.
+ * Procedure: docs/workflows/SPEC-FIRST-WORKFLOW.md and docs/workflows/AGENT-PARITY-WORKFLOW.md.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -22,6 +23,9 @@ const WAIVER_GATES = ['spec-impact', 'agent-parity'];
 const MIN_REASON_WORDS = 8;
 const MIN_WAIVER_WORDS = 12;
 const HOOK_SCRIPT = 'scripts/hooks/post-edit-reminder.mjs';
+const FORMAT_DOC = 'docs/agent-sdd/FORMAT.md';
+const SPEC_DOC = 'docs/workflows/SPEC-FIRST-WORKFLOW.md';
+const PARITY_DOC = 'docs/workflows/AGENT-PARITY-WORKFLOW.md';
 const problems = [];
 const fail = (message) => problems.push(message);
 const normalize = (value) => value.replace(/^﻿/, '').replaceAll('\r\n', '\n');
@@ -31,13 +35,15 @@ function json(path) {
   try {
     return JSON.parse(readFileSync(path, 'utf8'));
   } catch (error) {
-    fail(`cannot parse ${rel(path)}: ${error.message}`);
+    fail(`cannot parse ${rel(path)}: ${error.message}. Fix the JSON syntax (a JSON validator in your editor shows the exact spot).`);
     return null;
   }
 }
 
 const config = existsSync(CONFIG_PATH) ? json(CONFIG_PATH) : null;
-if (!config) fail('missing or invalid .agent-sdd/config.json');
+if (!config) {
+  fail('missing or invalid .agent-sdd/config.json. This file tells the gate which folders hold application code; re-run the cross-agent-sdd "apply --write" command to recreate it.');
+}
 
 const skippedNames = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.turbo']);
 const skippedPrefixes = [];
@@ -110,7 +116,7 @@ function checkDocs() {
   for (const path of markdown) {
     for (const link of markdownLinks(path)) {
       if (!existsSync(link.absolute)) {
-        fail(`dangling markdown link in ${rel(path)}: ${link.raw}`);
+        fail(`${rel(path)} links to "${link.raw}" but that file does not exist. Fix the link target or restore the file.`);
         continue;
       }
       const key = rel(link.absolute);
@@ -123,23 +129,27 @@ function checkDocs() {
     const name = basename(path);
     if (!['AGENTS.md', 'SPEC.md'].includes(name)) continue;
     if (rel(path) === 'AGENTS.md') continue;
-    if (!inbound.has(rel(path))) fail(`unreachable ${name}: ${rel(path)}`);
+    if (!inbound.has(rel(path))) {
+      fail(`unreachable ${name}: ${rel(path)}. No other Markdown file links to it, so people and agents cannot find it. Add a link from the nearest AGENTS.md or README.md.`);
+    }
   }
 }
 
 function specMetadata(path, body) {
   if (!body.startsWith('---\n')) {
-    fail(`missing SPEC frontmatter: ${rel(path)}`);
+    fail(`missing SPEC frontmatter: ${rel(path)}. Every SPEC.md starts with a "---" block that contains "id: <unique-id>" (shape in ${FORMAT_DOC}).`);
     return { id: null, critical: [] };
   }
   const end = body.indexOf('\n---\n', 4);
   if (end < 0) {
-    fail(`unterminated SPEC frontmatter: ${rel(path)}`);
+    fail(`unterminated SPEC frontmatter: ${rel(path)}. The opening "---" line has no closing "---" line.`);
     return { id: null, critical: [] };
   }
   const frontmatter = body.slice(4, end);
   const id = frontmatter.match(/^id:\s*([a-z0-9]+(?:[.-][a-z0-9]+)*)\s*$/m)?.[1] ?? null;
-  if (!id) fail(`missing or invalid stable id: ${rel(path)}`);
+  if (!id) {
+    fail(`missing or invalid stable id: ${rel(path)}. Add "id: <lowercase id, dots or dashes allowed>" inside the frontmatter. Tests cite this id, so it never changes once set.`);
+  }
   const critical = [];
   let active = false;
   for (const line of frontmatter.split('\n')) {
@@ -172,24 +182,31 @@ function checkSpecs() {
     const { id, critical } = specMetadata(path, body);
     const invariants = new Set();
     for (const match of body.matchAll(/^(?:-\s+)?(?:\*\*)?(V\d+)(?:\*\*)?:/gm)) {
-      if (invariants.has(match[1])) fail(`duplicate invariant ${match[1]}: ${rel(path)}`);
+      if (invariants.has(match[1])) {
+        fail(`duplicate invariant ${match[1]}: ${rel(path)}. Each V<n> id appears once; give the second one a new number and never reuse a retired number.`);
+      }
       invariants.add(match[1]);
     }
     for (const invariant of critical) {
-      if (!invariants.has(invariant)) fail(`critical invariant does not exist: ${id ?? rel(path)}:${invariant}`);
+      if (!invariants.has(invariant)) {
+        fail(`critical invariant does not exist: ${id ?? rel(path)}:${invariant}. The frontmatter lists ${invariant} under "critical:" but the body has no line starting with "${invariant}:". Add the invariant or remove it from the list.`);
+      }
     }
-    for (const [heading, prefix] of [
-      ['Tasks', 'T'],
-      ['Bugs', 'B'],
+    for (const [heading, prefix, example] of [
+      ['Tasks', 'T', 'T1|status|task|cites'],
+      ['Bugs', 'B', 'B1|date|cause|fix'],
     ]) {
       const section = ledgerSection(body, heading, prefix);
       if (section !== null && !new RegExp(`^${prefix}\\d+\\s*\\|`, 'm').test(section)) {
-        fail(`empty ${heading} ledger (remove heading until first row): ${rel(path)}`);
+        fail(`empty ${heading} ledger: ${rel(path)}. Add the first row (${example}) or remove the "## ${heading}" heading until there is one.`);
       }
     }
     if (!id) continue;
-    if (specs.has(id)) fail(`duplicate SPEC id ${id}: ${rel(specs.get(id).path)} + ${rel(path)}`);
-    else specs.set(id, { path, invariants, critical });
+    if (specs.has(id)) {
+      fail(`duplicate SPEC id ${id}: ${rel(specs.get(id).path)} + ${rel(path)}. Give each SPEC.md its own id.`);
+    } else {
+      specs.set(id, { path, invariants, critical });
+    }
   }
 
   const citationFiles = files((path) =>
@@ -203,11 +220,11 @@ function checkSpecs() {
     for (const match of body.matchAll(/@spec\s+([a-z0-9]+(?:[.-][a-z0-9]+)*):(V\d+)\b/g)) {
       const spec = specs.get(match[1]);
       if (!spec) {
-        fail(`citation names unknown SPEC ${match[1]}: ${rel(path)}`);
+        fail(`citation names unknown SPEC ${match[1]}: ${rel(path)}. The "@spec ${match[1]}:${match[2]}" text points at a SPEC id that does not exist; fix the id or add the SPEC.`);
         continue;
       }
       if (!spec.invariants.has(match[2])) {
-        fail(`citation names unknown invariant ${match[1]}:${match[2]}: ${rel(path)}`);
+        fail(`citation names unknown invariant ${match[1]}:${match[2]}: ${rel(path)}. ${rel(spec.path)} has no "${match[2]}:" line; fix the number in the citation or add the invariant.`);
         continue;
       }
       if (/(?:^|\/)(?:__tests__\/|[^/]+\.(?:spec|test)\.[^/]+$)/.test(rel(path))) {
@@ -217,7 +234,13 @@ function checkSpecs() {
   }
   for (const [id, spec] of specs) {
     for (const invariant of spec.critical) {
-      if (!evidence.has(`${id}:${invariant}`)) fail(`critical invariant lacks executable evidence: ${id}:${invariant}`);
+      if (!evidence.has(`${id}:${invariant}`)) {
+        fail(
+          `critical invariant lacks executable evidence: ${id}:${invariant} (${rel(spec.path)}). ${invariant} is marked critical, so a test must prove it: ` +
+            `put "@spec ${id}:${invariant}" in a test title or a comment inside a *.test.* / *.spec.* / __tests__ file. ` +
+            `If ${invariant} cannot be tested as written, ask the SPEC owner to split it or remove it from "critical:". Never cite a test that proves only part of it.`,
+        );
+      }
     }
   }
 }
@@ -237,13 +260,13 @@ function checkAdapterLinks(adapterPath) {
     ),
   ];
   if (workflows.length !== 1) {
-    fail(`adapter must link exactly one canonical docs/workflows document (found ${workflows.length}): ${adapter}`);
+    fail(`adapter must link exactly one canonical docs/workflows document (found ${workflows.length}): ${adapter}. Adapters stay thin: one Markdown link to the workflow they implement, no copied steps.`);
     return;
   }
   const workflowPath = join(ROOT, workflows[0]);
   if (!existsSync(workflowPath)) return; // checkDocs reports the dangling link.
   if (!markdownLinks(workflowPath).some((link) => rel(link.absolute) === adapter)) {
-    fail(`${workflows[0]} does not link back to ${adapter}`);
+    fail(`${workflows[0]} does not link back to ${adapter}. Add the adapter to the "Adapters:" list in that workflow so readers can find both directions.`);
   }
 }
 
@@ -264,24 +287,28 @@ function checkAgents() {
   const sharedSkills = new Set(skillNames(join(ROOT, '.agents', 'skills')));
   if (agents.has('claude') && (agents.has('codex') || agents.has('cursor'))) {
     for (const name of claudeSkills) {
-      if (!sharedSkills.has(name)) fail(`Claude skill lacks .agents counterpart: ${name}`);
+      if (!sharedSkills.has(name)) {
+        fail(`Claude skill lacks .agents counterpart: ${name}. Create .agents/skills/${name}/SKILL.md (plus agents/openai.yaml) so Codex and Cursor get the same workflow (${PARITY_DOC}).`);
+      }
     }
     for (const name of sharedSkills) {
       if (!claudeSkills.has(name) && !existsSync(join(ROOT, '.claude', 'rules', `${name}.md`))) {
-        fail(`.agents skill lacks Claude counterpart (.claude/skills/${name} or .claude/rules/${name}.md): ${name}`);
+        fail(`.agents skill lacks Claude counterpart: ${name}. Create .claude/rules/${name}.md (for a path-scoped rule) or .claude/skills/${name}/SKILL.md (for a command a person invokes).`);
       }
     }
   }
   if (agents.has('codex')) {
     for (const name of sharedSkills) {
       if (!existsSync(join(ROOT, '.agents', 'skills', name, 'agents', 'openai.yaml'))) {
-        fail(`.agents/skills/${name} lacks agents/openai.yaml (Codex skill metadata)`);
+        fail(`.agents/skills/${name} lacks agents/openai.yaml (Codex skill metadata). Copy the file shape from another skill folder and adjust the display name and prompt.`);
       }
     }
   }
 
   if (agents.has('claude') && agents.has('cursor') && existsSync(join(ROOT, '.claude', 'rules'))) {
-    for (const problem of cursorRulesProblems(ROOT)) fail(`${problem} (run node scripts/gen-cursor-rules.mjs)`);
+    for (const problem of cursorRulesProblems(ROOT)) {
+      fail(`${problem}. Cursor rule files are generated from .claude/rules: run "node scripts/gen-cursor-rules.mjs" and commit the result; never edit .mdc files by hand.`);
+    }
   }
 
   const adapters = [];
@@ -307,21 +334,21 @@ function checkAgents() {
   for (const agent of agents) {
     const path = hookConfigs[agent];
     if (!path || !existsSync(join(ROOT, path))) {
-      fail(`missing ${agent} hook config: ${path ?? agent}`);
+      fail(`missing ${agent} hook config: ${path ?? agent}. Re-run the cross-agent-sdd "apply --write" command, or remove "${agent}" from "agents" in .agent-sdd/config.json if that tool is not used here.`);
       continue;
     }
     const data = json(join(ROOT, path));
     if (!data) continue;
     const commands = hookCommands(data);
     if (!commands.length) {
-      fail(`${agent} hook config does not invoke shared reminder: ${path}`);
+      fail(`${path} does not run ${HOOK_SCRIPT}. Every enabled AI tool must call the same reminder script after it edits a file; re-run "apply --write" or add the hook back.`);
       continue;
     }
     if (agent === 'cursor' && !commands.every((command) => /\s--cursor\b/.test(command))) {
-      fail(`${path}: Cursor command must pass --cursor to ${HOOK_SCRIPT}`);
+      fail(`${path}: the Cursor command must end with "--cursor" so the reminder script uses Cursor's output format.`);
     }
     if (agent !== 'cursor' && commands.some((command) => /--cursor\b/.test(command))) {
-      fail(`${path}: ${agent} command must not pass --cursor to ${HOOK_SCRIPT}`);
+      fail(`${path}: only the Cursor command may pass "--cursor"; remove it from the ${agent} hook command.`);
     }
   }
 }
@@ -346,17 +373,17 @@ function checkConfigGroups() {
   if (!(config?.profiles ?? []).includes('config')) return;
   const groups = config.configGroups ?? [];
   if (!groups.length) {
-    fail('config profile enabled but .agent-sdd/config.json has no configGroups');
+    fail('config profile enabled but .agent-sdd/config.json has no configGroups. Describe each application\'s config files there (name, source JSON, and the surfaces that must carry the same keys), or remove "config" from "profiles".');
     return;
   }
   for (const group of groups) {
     if (!group?.name || !group?.source || !Array.isArray(group.surfaces)) {
-      fail('invalid config group: require name, source, surfaces[]');
+      fail('invalid config group in .agent-sdd/config.json: each group needs "name", "source" (a JSON file path), and "surfaces" (an array of {path, mode}).');
       continue;
     }
     const sourcePath = resolve(ROOT, group.source);
     if (!existsSync(sourcePath)) {
-      fail(`config group ${group.name} missing source: ${group.source}`);
+      fail(`config group ${group.name}: source file ${group.source} does not exist. Point "source" at the JSON config file that defines the keys.`);
       continue;
     }
     const source = json(sourcePath);
@@ -365,7 +392,7 @@ function checkConfigGroups() {
     for (const surface of group.surfaces) {
       const surfacePath = resolve(ROOT, surface.path ?? '');
       if (!surface.path || !existsSync(surfacePath)) {
-        fail(`config group ${group.name} missing surface: ${surface.path ?? '<path>'}`);
+        fail(`config group ${group.name}: surface ${surface.path ?? '<path>'} does not exist. Fix the path or remove the surface.`);
         continue;
       }
       if (surface.mode === 'json') {
@@ -373,18 +400,20 @@ function checkConfigGroups() {
         if (!target) continue;
         const targetKeys = flatten(target);
         for (const key of keys) {
-          if (!targetKeys.has(key)) fail(`config group ${group.name}: ${surface.path} lacks ${key}`);
+          if (!targetKeys.has(key)) {
+            fail(`config group ${group.name}: ${surface.path} lacks key "${key}" that ${group.source} defines. Add the key (with the right value for that environment) so every copy of the config has the same shape.`);
+          }
         }
       } else if (surface.mode === 'text') {
         const text = readFileSync(surfacePath, 'utf8');
         for (const key of keys) {
           const leaf = key.split('.').at(-1);
           if (!new RegExp(`\\b${regexEscape(leaf)}\\b`).test(text)) {
-            fail(`config group ${group.name}: ${surface.path} does not mention ${key}`);
+            fail(`config group ${group.name}: ${surface.path} never mentions "${leaf}" (from key ${key} in ${group.source}). Add the key to that schema, reader, or template, or drop it from the source.`);
           }
         }
       } else {
-        fail(`config group ${group.name}: unsupported surface mode ${surface.mode}`);
+        fail(`config group ${group.name}: unsupported surface mode "${surface.mode}" for ${surface.path}. Use "json" for JSON files or "text" for any other file.`);
       }
     }
   }
@@ -393,10 +422,12 @@ function checkConfigGroups() {
 function checkHelmConfig() {
   if (!(config?.profiles ?? []).includes('helm')) return;
   const charts = config.helmCharts ?? [];
-  if (!charts.length) fail('helm profile enabled but .agent-sdd/config.json has no helmCharts');
+  if (!charts.length) {
+    fail('helm profile enabled but .agent-sdd/config.json has no helmCharts. List each chart folder (the one containing Chart.yaml) under "helmCharts", or remove "helm" from "profiles".');
+  }
   for (const chart of charts) {
-    if (!existsSync(join(ROOT, chart, 'Chart.yaml'))) fail(`Helm chart lacks Chart.yaml: ${chart}`);
-    if (!existsSync(join(ROOT, chart, 'values.yaml'))) fail(`Helm chart lacks values.yaml: ${chart}`);
+    if (!existsSync(join(ROOT, chart, 'Chart.yaml'))) fail(`Helm chart ${chart} has no Chart.yaml. Point "helmCharts" at the folder that contains Chart.yaml.`);
+    if (!existsSync(join(ROOT, chart, 'values.yaml'))) fail(`Helm chart ${chart} has no values.yaml. Every listed chart needs a values.yaml next to Chart.yaml.`);
   }
 }
 
@@ -469,15 +500,17 @@ function mentionsFor(path) {
 
 function reasonProblems(reason, paths) {
   const out = [];
-  if (!reason) return ['reason is blank'];
-  if (/<[^>]*>/.test(reason)) out.push('reason contains a placeholder');
+  if (!reason) return ['the reason after "none -" is blank'];
+  if (/<[^>]*>/.test(reason)) out.push('the reason still contains a <placeholder> from the template; replace it with real words');
   if (reason.split(/\s+/).filter(Boolean).length < MIN_REASON_WORDS) {
-    out.push(`reason needs at least ${MIN_REASON_WORDS} words`);
+    out.push(`the reason needs at least ${MIN_REASON_WORDS} words`);
   }
   const mentions = new Set();
   for (const path of paths) {
     const own = mentionsFor(path);
-    if (!own.some((value) => reason.includes(value))) out.push(`reason does not name ${path}`);
+    if (!own.some((value) => reason.includes(value))) {
+      out.push(`the reason does not name ${path} (use its file name or a folder on its path)`);
+    }
     for (const value of own) mentions.add(value);
   }
   let stripped = reason;
@@ -489,7 +522,7 @@ function reasonProblems(reason, paths) {
     .split(/[^a-z0-9]+/)
     .filter((word) => word && !GENERIC_WORDS.has(word));
   if (substantive.length < 2) {
-    out.push('reason is generic: say what changed and why behavior cannot change');
+    out.push('the reason is generic ("refactor only", "no behavior change"): say what changed and why that cannot alter behavior');
   }
   return out;
 }
@@ -504,12 +537,20 @@ function impactProblems(changedFiles, message, label, waived = new Set()) {
       if (!owner || !changed.has(owner)) missing.push({ path, owner });
     }
     if (missing.length) {
+      const listing = missing
+        .map((item) => `${item.path} (owner: ${item.owner ?? 'none found - add a SPEC.md or AGENTS.md above it'})`)
+        .join(', ');
       const reason = trailer(message, 'Spec-Impact');
       if (reason === null) {
-        fail(`${label}: runtime paths lack owning contract change: ${missing.map((item) => item.path).join(', ')}`);
+        fail(
+          `${label}: runtime paths lack owning contract change: ${listing}. These files changed but the SPEC.md or AGENTS.md that owns them did not. ` +
+            'Either update the owner in the same commit, or add this line to the commit message: ' +
+            '"Spec-Impact: none - <at least 8 words naming each file and why behavior cannot change>". ' +
+            `Procedure: ${SPEC_DOC}.`,
+        );
       } else {
         for (const problem of reasonProblems(reason, missing.map((item) => item.path))) {
-          fail(`${label}: rejected Spec-Impact trailer: ${problem}`);
+          fail(`${label}: rejected Spec-Impact trailer: ${problem}. Files without an owner change: ${missing.map((item) => item.path).join(', ')}.`);
         }
       }
     }
@@ -540,10 +581,14 @@ function impactProblems(changedFiles, message, label, waived = new Set()) {
   if (partnerMissing.length) {
     const reason = trailer(message, 'Agent-Parity');
     if (reason === null) {
-      fail(`${label}: harness paths lack partner change: ${partnerMissing.join(', ')}`);
+      fail(
+        `${label}: harness paths lack partner change: ${partnerMissing.join(', ')}. Claude Code, Codex, and Cursor files move together ` +
+          `(partner table in ${PARITY_DOC}). Update the partner files in the same commit, or add this line to the commit message: ` +
+          '"Agent-Parity: none - <reason naming each file and why the other tools need no change>".',
+      );
     } else {
       for (const problem of reasonProblems(reason, partnerMissing)) {
-        fail(`${label}: rejected Agent-Parity trailer: ${problem}`);
+        fail(`${label}: rejected Agent-Parity trailer: ${problem}. Files without a partner change: ${partnerMissing.join(', ')}.`);
       }
     }
   }
@@ -555,35 +600,35 @@ function loadWaivers() {
   const entries = json(WAIVERS_PATH);
   if (entries === null) return null;
   const errors = [];
-  if (!Array.isArray(entries)) errors.push('waiver list must be a JSON array');
+  if (!Array.isArray(entries)) errors.push('the file must contain a JSON array of waiver objects');
   const seen = new Set();
   for (const [index, entry] of Array.isArray(entries) ? entries.entries() : []) {
     const at = `waiver #${index + 1}`;
     if (!entry || typeof entry !== 'object') {
-      errors.push(`${at}: must be an object`);
+      errors.push(`${at}: must be an object with "commit", "gates", and "reason"`);
       continue;
     }
     if (typeof entry.commit !== 'string' || !/^[0-9a-f]{40}$/.test(entry.commit)) {
-      errors.push(`${at}: commit must be a full 40-char lowercase SHA`);
+      errors.push(`${at}: "commit" must be the full 40-character lowercase SHA (run "git rev-parse <ref>")`);
     } else if (seen.has(entry.commit)) {
-      errors.push(`${at}: commit ${entry.commit.slice(0, 12)} listed twice`);
+      errors.push(`${at}: commit ${entry.commit.slice(0, 12)} is listed twice`);
     } else {
       seen.add(entry.commit);
     }
     if (!Array.isArray(entry.gates) || !entry.gates.length) {
-      errors.push(`${at}: gates must be a non-empty array`);
+      errors.push(`${at}: "gates" must be a non-empty array (allowed: ${WAIVER_GATES.join(', ')})`);
     } else {
       for (const gate of entry.gates) {
-        if (!WAIVER_GATES.includes(gate)) errors.push(`${at}: unknown gate "${gate}" (known: ${WAIVER_GATES.join(', ')})`);
+        if (!WAIVER_GATES.includes(gate)) errors.push(`${at}: unknown gate "${gate}" (allowed: ${WAIVER_GATES.join(', ')})`);
       }
     }
     const words = typeof entry.reason === 'string' ? entry.reason.trim().split(/\s+/).filter(Boolean) : [];
     if (words.length < MIN_WAIVER_WORDS) {
-      errors.push(`${at}: reason has ${words.length} words; need at least ${MIN_WAIVER_WORDS}`);
+      errors.push(`${at}: "reason" has ${words.length} words; write at least ${MIN_WAIVER_WORDS} so a reviewer can check it`);
     }
   }
   if (errors.length) {
-    for (const error of errors) fail(`.agent-sdd/waivers.json: ${error}`);
+    for (const error of errors) fail(`.agent-sdd/waivers.json: ${error}.`);
     return null;
   }
   return new Map(entries.map((entry) => [entry.commit, new Set(entry.gates)]));
@@ -596,31 +641,37 @@ function loadWaivers() {
 function resolveBase(args) {
   const env = (name) => (process.env[name] ?? '').trim() || null;
   const explicit = option(args, '--base') ?? env('SDD_BASE_REF');
-  if (explicit) return refExists(explicit) ? { base: explicit } : { error: `no resolvable base: ${explicit}` };
+  if (explicit) {
+    return refExists(explicit)
+      ? { base: explicit }
+      : { error: `no resolvable base: ${explicit}. Git cannot find that commit or branch; check the value passed with --base or in SDD_BASE_REF.` };
+  }
   const target = env('CHANGE_TARGET');
   if (target) {
     const candidates = [`origin/${target}`, target];
     const found = candidates.find(refExists);
     return found
       ? { base: found }
-      : { error: `no resolvable base for CHANGE_TARGET=${target} (tried ${candidates.join(', ')})` };
+      : { error: `no resolvable base for CHANGE_TARGET=${target} (tried ${candidates.join(', ')}). Fetch the target branch in CI before running the gate, or pass --base explicitly.` };
   }
   const fallbacks = [env('GIT_PREVIOUS_COMMIT'), env('GIT_PREVIOUS_SUCCESSFUL_COMMIT'), 'HEAD^'].filter(Boolean);
   const found = fallbacks.find(refExists);
-  return found ? { base: found } : { error: `no resolvable base (tried ${fallbacks.join(', ')})` };
+  return found
+    ? { base: found }
+    : { error: `no resolvable base (tried ${fallbacks.join(', ')}). Pass --base <commit-or-branch> to say which commits to audit.` };
 }
 
 function checkChangeImpact(args) {
   const staged = args.includes('--staged');
   const changed = args.includes('--changed');
   if (staged && changed) {
-    fail('choose only one mode: --staged or --changed');
+    fail('choose only one mode: --staged (files staged for the next commit) or --changed (commits since a base).');
     return;
   }
   if (staged) {
     const messagePath = option(args, '--commit-msg');
     if (!messagePath) {
-      fail('--staged requires --commit-msg <path>');
+      fail('--staged requires --commit-msg <path>: the gate reads the commit message to accept "Spec-Impact: none" and "Agent-Parity: none" explanations. In a commit-msg hook pass "$1".');
       return;
     }
     const changedFiles = git(['diff', '--cached', '--name-only', '--diff-filter=ACMRD']).split('\n').filter(Boolean);
@@ -637,7 +688,7 @@ function checkChangeImpact(args) {
     try {
       for (const commit of git(['rev-list', '--reverse', `${resolved.base}..HEAD`]).split('\n').filter(Boolean)) {
         const waived = waivers.get(commit) ?? new Set();
-        if (waived.size) console.log(`check-sdd: waived ${commit.slice(0, 12)} for ${[...waived].join(', ')} (.agent-sdd/waivers.json)`);
+        if (waived.size) console.log(`check-sdd: waived ${commit.slice(0, 12)} for ${[...waived].join(', ')} (listed in .agent-sdd/waivers.json)`);
         if (waived.size === WAIVER_GATES.length) continue;
         const changedFiles = git([
           'diff-tree', '--root', '--no-commit-id', '--name-only', '-r', '--diff-filter=ACMRD', commit,
@@ -660,8 +711,9 @@ function main() {
   checkChangeImpact(args);
 
   if (problems.length) {
-    console.error(`check-sdd: ${problems.length} problem(s)`);
+    console.error(`check-sdd found ${problems.length} problem(s). Each line says what is wrong and how to fix it:`);
     for (const problem of problems) console.error(`  x ${problem}`);
+    console.error(`File shapes: ${FORMAT_DOC}. Procedure: ${SPEC_DOC}. Tool parity: ${PARITY_DOC}.`);
     process.exit(1);
   }
   console.log('check-sdd: ok');
