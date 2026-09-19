@@ -150,6 +150,7 @@ test('apply is idempotent, follows rule-vs-skill ownership, and verifies', () =>
 
   const verified = run(['verify', root]);
   assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`);
+  assert.match(verified.stdout, /verify: ok/);
 
   const planned = run(['plan', root, '--json']);
   assert.equal(planned.status, 0, planned.stderr);
@@ -209,6 +210,8 @@ test('ledger parser reads header rows through next heading or EOF [@spec cross-a
   assert.notEqual(checked.status, 0);
   assert.match(checked.stderr, /empty Tasks ledger/);
   assert.match(checked.stderr, /empty Bugs ledger/);
+  assert.match(checked.stderr, /T1\|/);
+  assert.match(checked.stderr, /docs\/agent-sdd\/FORMAT\.md/);
 
   writeFileSync(specPath, `${head}T1|todo|exercise multiline task ledger|V1\n\n${bugs}B1|2026-09-19|fixture cause|V1\n`, 'utf8');
   checked = gate(root);
@@ -220,6 +223,12 @@ test('existing AGENTS.md requires explicit managed-block merge', () => {
   writeFileSync(join(root, 'AGENTS.md'), '# Existing policy\n', 'utf8');
   git(root, ['add', 'AGENTS.md']);
   git(root, ['commit', '-m', 'docs: add existing agent policy']);
+
+  const planned = run(['plan', root]);
+  assert.equal(planned.status, 0, planned.stderr);
+  assert.match(planned.stdout, /AGENTS\.md: this file already exists/);
+  assert.match(planned.stdout, /re-run with --merge-agents/);
+  assert.match(planned.stdout, /conflict = /);
 
   const blocked = run(['apply', root, '--write']);
   assert.notEqual(blocked.status, 0);
@@ -401,6 +410,73 @@ test('exclude entries with a slash skip a repo-relative path prefix', () => {
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
   checked = gate(root);
   assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('help, dry runs, and the applied summary explain themselves to a newcomer', () => {
+  const help = run(['--help']);
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /dry run/i);
+  assert.match(help.stdout, /Changes nothing/);
+  assert.match(help.stdout, /audit <repo>.*\n.*plan <repo>/);
+
+  const root = fixture();
+  const dry = run(['apply', root]);
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /nothing was written/i);
+  assert.match(dry.stdout, /--write/);
+  assert.equal(existsSync(join(root, 'AGENTS.md')), false);
+
+  const applied = run(['apply', root, '--write']);
+  assert.match(applied.stdout, /Next steps:/);
+  assert.match(applied.stdout, /node scripts\/check-sdd\.mjs/);
+  assert.match(applied.stdout, /pre-commit/);
+
+  const install = run(['install-skill', '--scope', 'project', '--repo', root]);
+  assert.equal(install.status, 0, install.stderr);
+  assert.match(install.stdout, /dry run/i);
+  assert.match(install.stdout, /Add --write/);
+  assert.doesNotMatch(install.stdout, /^\{/);
+});
+
+test('gate messages say what is wrong and how to fix it', () => {
+  const root = installed();
+  mkdirSync(join(root, 'src'), { recursive: true });
+  writeFileSync(
+    join(root, 'src', 'SPEC.md'),
+    '---\nid: fixture.core\ncritical:\n  - V1\n---\n\n# Core\n\n## Invariants\n\nV1: Fixture holds.\n',
+    'utf8',
+  );
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\n[core](src/SPEC.md) and [gone](docs/missing.md)\n', 'utf8');
+  const checked = gate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /lacks executable evidence: fixture\.core:V1/);
+  assert.match(checked.stderr, /@spec fixture\.core:V1/);
+  assert.match(checked.stderr, /split it or remove it from "critical:"/);
+  assert.match(checked.stderr, /README\.md links to "docs\/missing\.md" but that file does not exist/);
+
+  writeFileSync(join(root, 'src', 'feature.js'), 'export const value = 1;\n', 'utf8');
+  git(root, ['add', 'src/feature.js']);
+  const messagePath = join(root, '.git', 'TEST_COMMIT_MSG');
+  writeFileSync(messagePath, 'feat: add feature\n', 'utf8');
+  const staged = gate(root, ['--staged', '--commit-msg', messagePath]);
+  assert.match(staged.stderr, /Spec-Impact: none - </);
+  assert.match(staged.stderr, /update the owner in the same commit/i);
+});
+
+test('post-edit reminder tells the agent what to do next in plain words', () => {
+  const root = installed();
+  const hook = join(root, 'scripts', 'hooks', 'post-edit-reminder.mjs');
+  const result = spawnSync(process.execPath, [hook], {
+    cwd: root,
+    encoding: 'utf8',
+    input: JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: join(root, 'src', 'a.js') } }),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const context = JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
+  assert.match(context, /You edited src\/a\.js/);
+  assert.match(context, /changes-log\.md/);
+  assert.match(context, /Spec impact: changed/);
+  assert.match(context, /node scripts\/check-sdd\.mjs/);
 });
 
 test('asset templates never use harness-discoverable directory names', () => {

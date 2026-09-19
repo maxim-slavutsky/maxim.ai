@@ -39,8 +39,11 @@ function main() {
   const paths = editedPaths(payload?.tool_input);
   if (!paths.length) return;
   const context =
-    `REMINDER: Edited ${paths.join(', ')}. Before handoff, update changes-log.md with intent and ` +
-    '`Spec impact: changed | none`, reconcile owning SPEC/evidence, and run repository SDD gates.';
+    `You edited ${paths.join(', ')}. Before you finish this task: ` +
+    '(1) append an entry to changes-log.md at the repository root (create it if missing) that names the files, ' +
+    'says what changed and why, and ends with "Spec impact: changed" or "Spec impact: none - <concrete reason>"; ' +
+    '(2) if behavior changed, update the SPEC.md that owns these files and the test that proves it; ' +
+    '(3) run "node scripts/check-sdd.mjs" and fix what it reports.';
   process.stdout.write(
     JSON.stringify(
       cursorOutput

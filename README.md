@@ -1,24 +1,21 @@
 # maxim.ai
 
-Private, versioned AI skills.
+Private, versioned AI skills and plugins. Each entry has its own README with install steps and usage.
 
 ## Skills
 
-| Skill | Purpose |
-|---|---|
-| [`cross-agent-sdd`](skills/cross-agent-sdd/SKILL.md) ([contract](skills/cross-agent-sdd/SPEC.md)) | One shared SDD policy across Claude Code, Codex, and Cursor |
+| Skill | What it does | Docs |
+|---|---|---|
+| `cross-agent-sdd` | Installs one spec-driven-development policy into a repository for Claude Code, Codex, and Cursor: shared instructions, thin per-tool adapters, a post-edit reminder hook, and a commit-time gate. | [README](skills/cross-agent-sdd/README.md) · [SKILL.md](skills/cross-agent-sdd/SKILL.md) · [contract](skills/cross-agent-sdd/SPEC.md) |
 
-Install for local Claude Code, Codex, and Cursor sessions:
+## Plugins
 
-```powershell
-node skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs install-skill --agents all --scope user --write
-```
+None yet.
 
-The installer uses Node.js filesystem APIs and the same command works in PowerShell, Command Prompt,
-Bash, and zsh.
+## Development
 
-Run the skill test suite:
-
-```powershell
+```bash
 npm test
 ```
+
+Runs every `skills/*/scripts/*.test.mjs` with the Node test runner. Node 22 or newer.
