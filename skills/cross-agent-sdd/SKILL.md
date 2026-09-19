@@ -25,7 +25,8 @@ hook, and CI integration.
 6. Complete target-specific work the generator cannot infer safely:
    - merge the managed `AGENTS.md` block when required;
    - map actual runtime/config ownership in `.agent-sdd/config.json`;
-   - wire `node scripts/check-sdd.mjs` into existing Git hooks and CI;
+   - wire the gate: `node scripts/check-sdd.mjs` in pre-commit, `--staged --commit-msg` in commit-msg, and in
+     CI both the static command and `--changed` (static alone never inspects a commit);
    - regenerate `.cursor/rules/*.mdc` with `node scripts/gen-cursor-rules.mjs` after any `.claude/rules` edit;
    - add or reconcile real module `SPEC.md` files without inventing behavior;
    - update package-manager aliases only when useful.
@@ -42,7 +43,7 @@ path contains spaces.
 ```text
 node <skill>/scripts/cross-agent-sdd.mjs audit <repo> [--json]
 node <skill>/scripts/cross-agent-sdd.mjs plan <repo> [--profiles core,sdd,config,helm] [--agents all]
-node <skill>/scripts/cross-agent-sdd.mjs apply <repo> --write [--merge-agents] [--allow-dirty]
+node <skill>/scripts/cross-agent-sdd.mjs apply <repo> --write [--merge-agents] [--replace <path,...>] [--allow-dirty]
 node <skill>/scripts/cross-agent-sdd.mjs verify <repo>
 node <skill>/scripts/cross-agent-sdd.mjs uninstall <repo> [--write] [--force] [--yes]
 node <skill>/scripts/cross-agent-sdd.mjs install-skill --scope user|project --agents all --write

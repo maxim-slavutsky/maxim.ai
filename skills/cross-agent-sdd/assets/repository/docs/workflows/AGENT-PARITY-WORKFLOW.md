@@ -23,8 +23,11 @@ Adapters:
 
 1. `.claude/skills/<name>` and `.agents/skills/<name>` move together.
 2. `.claude/rules/<name>.md` and `.cursor/rules/<name>.mdc` move together.
-3. Hook script change includes every enabled harness config.
-4. Adapter links one canonical workflow; workflow links every adapter.
+3. Hook configs (`.claude/settings.json`, `.codex/hooks.json`, `.cursor/hooks.json`) move together: a change
+   to one includes every other enabled config, or names a concrete parity exception. The shared script under
+   `scripts/hooks/` may change alone.
+4. Adapter links one canonical workflow; workflow links every adapter. A link to `.claude/rules/<name>.md`
+   also covers its generated `.cursor/rules/<name>.mdc`.
 5. Native-only metadata stays native and records a concrete parity exception when changed alone.
 6. Post-edit hooks are reminders, not pre-edit policy enforcement.
 7. Path-scoped concern = Claude rule + `.agents/skills` adapter; invocable workflow = skill in `.claude/skills` and

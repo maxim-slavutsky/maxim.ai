@@ -45,8 +45,19 @@ if (!config) {
   fail('missing or invalid .agent-sdd/config.json. This file tells the gate which folders hold application code; re-run the cross-agent-sdd "apply --write" command to recreate it.');
 }
 
+const HOOK_CONFIG_PATHS = {
+  claude: '.claude/settings.json',
+  codex: '.codex/hooks.json',
+  cursor: '.cursor/hooks.json',
+};
+const enabledAgents = new Set(config?.agents?.length ? config.agents : Object.keys(HOOK_CONFIG_PATHS));
+
+// The cross-agent-sdd skill itself may be installed into this repository (install-skill --scope project).
+// Its bundled templates, SPEC, and SKILL.md are tooling, not repository policy, so the gate never reads them.
+// Other tool skills installed in-repo go into "exclude" in .agent-sdd/config.json.
+const TOOL_SKILL_DIRS = ['.claude/skills/cross-agent-sdd', '.agents/skills/cross-agent-sdd', '.cursor/skills/cross-agent-sdd'];
 const skippedNames = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.turbo']);
-const skippedPrefixes = [];
+const skippedPrefixes = [...TOOL_SKILL_DIRS];
 for (const entry of config?.exclude ?? []) {
   const value = String(entry).replaceAll('\\', '/').replace(/^\.?\//, '').replace(/\/+$/, '');
   if (!value) continue;
@@ -247,7 +258,7 @@ function checkSpecs() {
 
 function skillNames(base) {
   if (!existsSync(base)) return [];
-  return readdirSync(base).filter((name) => existsSync(join(base, name, 'SKILL.md')));
+  return readdirSync(base).filter((name) => existsSync(join(base, name, 'SKILL.md')) && !isSkippedPath(join(base, name)));
 }
 
 function checkAdapterLinks(adapterPath) {
@@ -265,6 +276,9 @@ function checkAdapterLinks(adapterPath) {
   }
   const workflowPath = join(ROOT, workflows[0]);
   if (!existsSync(workflowPath)) return; // checkDocs reports the dangling link.
+  // A generated Cursor mirror is reached through its source rule: that rule's own back-link check covers it.
+  const mirror = adapter.match(/^\.cursor\/rules\/([^/]+)\.mdc$/);
+  if (mirror && existsSync(join(ROOT, '.claude', 'rules', `${mirror[1]}.md`))) return;
   if (!markdownLinks(workflowPath).some((link) => rel(link.absolute) === adapter)) {
     fail(`${workflows[0]} does not link back to ${adapter}. Add the adapter to the "Adapters:" list in that workflow so readers can find both directions.`);
   }
@@ -326,11 +340,7 @@ function checkAgents() {
   }
   for (const adapter of adapters) checkAdapterLinks(adapter);
 
-  const hookConfigs = {
-    claude: '.claude/settings.json',
-    codex: '.codex/hooks.json',
-    cursor: '.cursor/hooks.json',
-  };
+  const hookConfigs = HOOK_CONFIG_PATHS;
   for (const agent of agents) {
     const path = hookConfigs[agent];
     if (!path || !existsSync(join(ROOT, path))) {
@@ -528,7 +538,9 @@ function reasonProblems(reason, paths) {
 }
 
 function impactProblems(changedFiles, message, label, waived = new Set()) {
-  const changed = new Set(changedFiles.map((path) => path.replaceAll('\\', '/')));
+  const changed = new Set(
+    changedFiles.map((path) => path.replaceAll('\\', '/')).filter((path) => !isSkippedPath(join(ROOT, path))),
+  );
   if (!waived.has('spec-impact')) {
     const missing = [];
     for (const path of changed) {
@@ -567,10 +579,13 @@ function impactProblems(changedFiles, message, label, waived = new Set()) {
     }
     if ((match = path.match(/^\.claude\/rules\/([^/]+)\.md$/))) return [[`.cursor/rules/${match[1]}.mdc`]];
     if ((match = path.match(/^\.cursor\/rules\/([^/]+)\.mdc$/))) return [[`.claude/rules/${match[1]}.md`]];
-    if (/^\.(?:claude\/settings|codex\/hooks|cursor\/hooks)\.json$/.test(path)) {
-      return [['.claude/settings.json', '.codex/hooks.json', '.cursor/hooks.json']];
+    // Hook configs move together: each other enabled tool's config must change in the same commit. The
+    // changed file is never its own partner. The shared hook script under scripts/hooks needs no config change.
+    if (Object.values(HOOK_CONFIG_PATHS).includes(path)) {
+      return Object.entries(HOOK_CONFIG_PATHS)
+        .filter(([agent, other]) => other !== path && enabledAgents.has(agent))
+        .map(([, other]) => [other]);
     }
-    if (path.startsWith('scripts/hooks/')) return [['.claude/settings.json', '.codex/hooks.json', '.cursor/hooks.json']];
     return [];
   };
   for (const path of changed) {

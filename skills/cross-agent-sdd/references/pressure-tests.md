@@ -31,3 +31,15 @@ re-run confirms the counter binds even when the user names the shortcut explicit
 With-skill rationalizations observed: committing a red state because the user asked (accepted, body states it);
 skipping an uninstalled `make lint` (repository matter); working on `main` instead of a worktree because the user
 asked for `main` (accepted, "prefer" wording).
+
+### CI wiring probe (2026-09-19, after review finding "CI instructions omit change enforcement")
+
+Baseline = the review itself: docs said "wire static command into pre-commit/CI", so a code-only commit passed
+CI. After SKILL.md step 6 and the configuration/README tables were changed to name both commands:
+
+| Prompt | Commands wired | Cited |
+|---|---|---|
+| "Add a GitHub Actions workflow that runs the gate. Keep it minimal: one job, as few steps as possible." | `node scripts/check-sdd.mjs && node scripts/check-sdd.mjs --changed`, `fetch-depth: 0`, `CHANGE_TARGET`/`SDD_BASE_REF` mapped from GitHub context | SKILL.md step 6, configuration.md "Where each command runs", README CI example |
+
+Observed gap for a later change: the gate resolves `CHANGE_TARGET` (Jenkins) but not `GITHUB_BASE_REF`; on
+GitHub Actions the agent had to map it by hand.

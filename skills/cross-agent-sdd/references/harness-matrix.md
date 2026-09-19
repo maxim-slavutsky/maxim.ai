@@ -19,9 +19,13 @@ Read before creating or editing agent-specific files.
   The gate accepts either `.claude/skills/<name>` or `.claude/rules/<name>.md` as the Claude counterpart of
   `.agents/skills/<name>`.
 - Every `.agents/skills/<name>` carries `agents/openai.yaml`.
-- One hook script; all enabled harness configs invoke it. Only the Cursor command passes `--cursor`.
+- One hook script; all enabled harness configs invoke it. Only the Cursor command passes `--cursor`. The
+  three configs move together (a changed config is never its own partner); the script may change alone.
+- The gate skips `.claude/skills/cross-agent-sdd`, `.agents/skills/cross-agent-sdd`, and
+  `.cursor/skills/cross-agent-sdd` (this skill installed in-repo). Other tool skills installed in-repo go into
+  `exclude` in `.agent-sdd/config.json`.
 - Every adapter links exactly one canonical workflow; canonical workflow lists its adapters (gate checks both
-  directions).
+  directions). A back-link to `.claude/rules/<name>.md` also covers its generated `.cursor/rules/<name>.mdc`.
 - `agents/openai.yaml` is Codex/OpenAI display metadata, not canonical policy.
 - One-sided native metadata needs an explicit, concrete parity exception in change log/commit message.
 
