@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Helm charts"
+  short_description: "Lint, render, and kubeconform selected charts"
+  default_prompt: "Use $validate-helm-charts to validate the changed Helm charts before committing."

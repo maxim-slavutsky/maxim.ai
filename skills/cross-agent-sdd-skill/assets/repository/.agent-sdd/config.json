@@ -1,9 +1,0 @@
-{
-  "schemaVersion": 1,
-  "profiles": ["core", "sdd"],
-  "agents": ["claude", "codex", "cursor"],
-  "runtimeRoots": ["apps", "packages", "src"],
-  "exclude": ["node_modules", "dist", "build", "coverage", "vendor"],
-  "configGroups": [],
-  "helmCharts": []
-}

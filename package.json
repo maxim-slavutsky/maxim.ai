@@ -1,0 +1,11 @@
+{
+  "name": "maxim-ai-skills",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test skills/*/scripts/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

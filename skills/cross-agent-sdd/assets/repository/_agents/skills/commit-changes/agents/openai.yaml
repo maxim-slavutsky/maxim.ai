@@ -1,0 +1,4 @@
+interface:
+  display_name: "Commit changes"
+  short_description: "Validate and commit from the session changes log"
+  default_prompt: "Use $commit-changes to validate and commit the current session work from changes-log.md."
