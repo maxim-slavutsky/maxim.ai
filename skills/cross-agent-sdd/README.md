@@ -53,13 +53,32 @@ also fills in the parts a script cannot guess: which folders hold application co
 
 **Directly from a terminal.** Same result, you drive it:
 
+Run these from the repository root. The script lives where `install-skill` copied it; on Windows Command
+Prompt replace `~` with `%USERPROFILE%`.
+
 ```bash
-SKILL=~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs
-node $SKILL audit  .            # what is already here, changes nothing
-node $SKILL plan   .            # what apply would write, changes nothing
-node $SKILL apply  . --write    # write the files
-node $SKILL verify .            # check the result and run the gate
+node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs audit .
 ```
+
+Reports what is already in the repository. Changes nothing.
+
+```bash
+node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs plan .
+```
+
+Lists every file `apply` would create, keep, merge, or refuse. Changes nothing.
+
+```bash
+node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs apply . --write
+```
+
+Writes the files. Without `--write` it prints the plan and writes nothing.
+
+```bash
+node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs verify .
+```
+
+Checks that every generated file is intact and runs the gate.
 
 Every writing command is a dry run until you add `--write`. A file that already exists and was not created by
 this tool is reported as a conflict and never overwritten.
@@ -114,8 +133,10 @@ The tool never commits, pushes, or opens pull requests. Review the diff, then co
 ## CLI reference
 
 ```text
-node <skill>/scripts/cross-agent-sdd.mjs <command> [arguments]
+node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs <command> [arguments]
 ```
+
+Running from a checkout of this repository instead: `node skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs`.
 
 | Command | Writes files | Purpose |
 |---|---|---|
@@ -193,9 +214,16 @@ Every message ends with what to do. The most frequent ones:
 From a repository:
 
 ```bash
-node $SKILL uninstall .            # dry run: lists what would be deleted, edited, kept
-node $SKILL uninstall . --write    # asks you to type "uninstall", then removes it
+node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs uninstall .
 ```
+
+Dry run: lists what would be deleted, edited, or kept. Changes nothing.
+
+```bash
+node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs uninstall . --write
+```
+
+Asks you to type `uninstall`, then removes the files.
 
 What happens:
 
@@ -217,7 +245,9 @@ The command reminds you at the end.
 To remove the skill copies from your machine:
 
 ```bash
-node skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs uninstall-skill --scope user --agents all --write
+node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs uninstall-skill --scope user --agents all --write
 ```
+
+Asks you to type `uninstall`, then deletes the copies. Without `--write` it only lists them.
 
 Only folders this installer created are removed; anything else under those paths is left alone.
