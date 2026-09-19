@@ -118,6 +118,15 @@ function specMetadata(path, body) {
   return { id, critical };
 }
 
+function ledgerSection(body, heading, prefix) {
+  const match = new RegExp(`^##\\s+(?:${heading}|§${prefix})\\b[^\\n]*\\n`, 'mi').exec(body);
+  if (!match) return null;
+  const start = match.index + match[0].length;
+  const tail = body.slice(start);
+  const nextHeading = /^##\s+/m.exec(tail);
+  return nextHeading ? tail.slice(0, nextHeading.index) : tail;
+}
+
 function checkSpecs() {
   const specFiles = files((path) => basename(path) === 'SPEC.md');
   const specs = new Map();
@@ -132,9 +141,12 @@ function checkSpecs() {
     for (const invariant of critical) {
       if (!invariants.has(invariant)) fail(`critical invariant does not exist: ${id ?? rel(path)}:${invariant}`);
     }
-    for (const heading of ['Tasks', 'Bugs']) {
-      const section = new RegExp(`^## (?:.* )?${heading}[^\\n]*\\n([\\s\\S]*?)(?=^## |$)`, 'm').exec(body)?.[1];
-      if (section !== undefined && !/^\w+\d+\s*\|/m.test(section)) {
+    for (const [heading, prefix] of [
+      ['Tasks', 'T'],
+      ['Bugs', 'B'],
+    ]) {
+      const section = ledgerSection(body, heading, prefix);
+      if (section !== null && !new RegExp(`^${prefix}\\d+\\s*\\|`, 'm').test(section)) {
         fail(`empty ${heading} ledger (remove heading until first row): ${rel(path)}`);
       }
     }

@@ -80,6 +80,73 @@ test('apply is idempotent and generated repository verifies', () => {
   assert.equal(plan.actions.filter((action) => action.action !== 'preserve').length, 0);
 });
 
+test('ledger parser reads header rows through next heading or EOF [@spec cross-agent-sdd-skill.gates:V1]', () => {
+  const root = fixture();
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  mkdirSync(join(root, 'src'), { recursive: true });
+  const specPath = join(root, 'src', 'SPEC.md');
+  writeFileSync(
+    specPath,
+    `---
+id: fixture.ledger
+---
+
+# Fixture ledger
+
+## Invariants
+
+V1: Fixture remains stable.
+
+## Tasks
+
+id|status|task|cites
+---|---|---|---
+
+## §B - bugs
+
+id|date|cause|fix
+---|---|---|---
+`,
+    'utf8',
+  );
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\n[Ledger contract](src/SPEC.md)\n', 'utf8');
+  const gate = join(root, 'scripts', 'check-sdd.mjs');
+  let checked = spawnSync(process.execPath, [gate], { cwd: root, encoding: 'utf8' });
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /empty Tasks ledger/);
+  assert.match(checked.stderr, /empty Bugs ledger/);
+
+  writeFileSync(
+    specPath,
+    `---
+id: fixture.ledger
+---
+
+# Fixture ledger
+
+## Invariants
+
+V1: Fixture remains stable.
+
+## Tasks
+
+id|status|task|cites
+---|---|---|---
+T1|todo|exercise multiline task ledger|V1
+
+## §B - bugs
+
+id|date|cause|fix
+---|---|---|---
+B1|2026-09-19|fixture cause|V1
+`,
+    'utf8',
+  );
+  checked = spawnSync(process.execPath, [gate], { cwd: root, encoding: 'utf8' });
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
 test('existing AGENTS.md requires explicit managed-block merge', () => {
   const root = fixture();
   writeFileSync(join(root, 'AGENTS.md'), '# Existing policy\n', 'utf8');

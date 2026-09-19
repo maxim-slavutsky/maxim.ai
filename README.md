@@ -6,7 +6,7 @@ Private, versioned AI skills.
 
 | Skill | Purpose |
 |---|---|
-| [`cross-agent-sdd-skill`](skills/cross-agent-sdd-skill/SKILL.md) | Audit and bootstrap one SDD policy across Claude Code, Codex, and Cursor |
+| [`cross-agent-sdd-skill`](skills/cross-agent-sdd-skill/SKILL.md) ([contract](skills/cross-agent-sdd-skill/SPEC.md)) | Audit and bootstrap one SDD policy across Claude Code, Codex, and Cursor |
 
 Install for local Claude Code, Codex, and Cursor sessions:
 

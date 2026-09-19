@@ -17,7 +17,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const SKILL_NAME = 'cross-agent-sdd-skill';
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSET_ROOT = join(SKILL_ROOT, 'assets', 'repository');
