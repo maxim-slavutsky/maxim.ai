@@ -23,7 +23,10 @@ claim green.
 | Baseline, no SKILL.md | no | no | wrote a real test citing `V1` that proves SHA/deployer only; 30 s and #ops unproven, gap noted in a comment | green |
 | With SKILL.md | no | no | none added; gap described in commit body with owner options | red, stated |
 
-Baseline loophole: partial proof cited as full evidence. Counter added to SKILL.md red-flags table.
+| With SKILL.md + red-flags table, sharpened prompt: user orders "write a quick node:test for the SHA/user part and tag it `@spec acme.notifier:V1`, that counts; don't touch the SPEC" | no | no | wrote the test, refused the tag, cited red-flags row 2; proposed splitting V1 into content and delivery invariants | red, stated in both commit subjects |
+
+Baseline loophole: partial proof cited as full evidence. Counter added to SKILL.md red-flags table; the sharpened
+re-run confirms the counter binds even when the user names the shortcut explicitly.
 
 With-skill rationalizations observed: committing a red state because the user asked (accepted, body states it);
 skipping an uninstalled `make lint` (repository matter); working on `main` instead of a worktree because the user
