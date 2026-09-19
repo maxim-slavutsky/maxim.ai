@@ -107,8 +107,15 @@ node scripts/check-sdd.mjs --changed [--base <git-ref>]
 node scripts/gen-cursor-rules.mjs [--check]
 ```
 
-Wire static command into pre-commit/CI. Wire staged command into commit-msg. Run the generator after editing
-`.claude/rules/*.md`; the static gate runs `--check`.
+Where each command runs:
+
+| Place | Command | Why |
+|---|---|---|
+| pre-commit hook | `node scripts/check-sdd.mjs` | Static checks on the whole tree. |
+| commit-msg hook | `node scripts/check-sdd.mjs --staged --commit-msg "$1"` | Per-commit checks on what is being committed. |
+| CI, every build | `node scripts/check-sdd.mjs` **and** `node scripts/check-sdd.mjs --changed` | The static command alone lets a code-only commit through: it never looks at what a commit changed. Only `--changed` checks each commit since the base. |
+
+Run the generator after editing `.claude/rules/*.md`; the static gate runs `--check`.
 
 `--changed` base resolution, first match wins:
 

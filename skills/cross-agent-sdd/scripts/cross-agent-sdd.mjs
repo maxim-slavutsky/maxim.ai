@@ -19,7 +19,7 @@ import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { toMdc } from '../assets/repository/scripts/gen-cursor-rules.mjs';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const SKILL_NAME = 'cross-agent-sdd';
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSET_ROOT = join(SKILL_ROOT, 'assets', 'repository');
@@ -101,6 +101,9 @@ Options for plan, apply, and uninstall
   --agents all | claude,codex,cursor   Which AI tools to configure. Default: all three. (plan, apply)
   --merge-agents                    When AGENTS.md or CLAUDE.md already exists, append the managed block or the
                                     @AGENTS.md import instead of stopping. Read those files first. (plan, apply)
+  --replace <path>[,<path>]         Write the tool version of these tool-owned files even if you edited them or
+                                    they existed before install. They become tool-owned: upgrades update them
+                                    and uninstall deletes them. (plan, apply)
   --allow-dirty                     Run even if the repository has uncommitted changes. Not recommended.
   --yes                             Skip the typed confirmation. Only for scripts, and only after a person has
                                     confirmed. (uninstall, uninstall-skill)
@@ -387,7 +390,12 @@ function stripHookConfig(agent, current) {
     }
   } else {
     if (Array.isArray(data.hooks?.PostToolUse)) {
-      data.hooks.PostToolUse = data.hooks.PostToolUse.filter((entry) => !(entry?.hooks ?? []).some((hook) => hookMatches(hook?.command)));
+      // Drop only our command. A user command in the same entry stays, and so does the entry around it.
+      data.hooks.PostToolUse = data.hooks.PostToolUse.flatMap((entry) => {
+        if (!Array.isArray(entry?.hooks) || !entry.hooks.some((hook) => hookMatches(hook?.command))) return [entry];
+        const hooks = entry.hooks.filter((hook) => !hookMatches(hook?.command));
+        return hooks.length ? [{ ...entry, hooks }] : [];
+      });
       if (!data.hooks.PostToolUse.length) delete data.hooks.PostToolUse;
     }
     if (data.description === CODEX_HOOK_DESCRIPTION) delete data.description;
@@ -462,12 +470,28 @@ function gitignoreContent(root) {
   return { action: 'merge', content: `${current.trimEnd()}\n\n${block}\n` };
 }
 
-function plan(root, profiles, agents, allowMerge = false) {
+/** How to get the tool version of an edited generated file back. "git checkout" only helps before a commit. */
+function restoreAdvice(path) {
+  return `To take the tool version back, run "apply <repo> --write --replace ${path}" (commit or discard other changes first).`;
+}
+
+function plan(root, profiles, agents, allowMerge = false, replace = []) {
   const manifest = readManifest(root);
   const desired = desiredFiles(root, profiles, agents);
+  const desiredPaths = new Set([...desired].map(([path]) => path));
+  const replaced = new Set(replace);
+  for (const path of replaced) {
+    if (!desiredPaths.has(path) || path === CONFIG) {
+      throw new Error(`--replace ${path}: not a file this tool generates for the selected profiles. Run "plan <repo>" to see the tool-owned files.`);
+    }
+  }
   const actions = [];
   for (const [path, content] of desired) {
     const absolute = join(root, path);
+    if (replaced.has(path)) {
+      actions.push({ path, action: existsSync(absolute) ? 'update-generated' : 'create', content, replaced: true });
+      continue;
+    }
     if (path === CONFIG && existsSync(absolute)) {
       actions.push({ path, action: read(absolute) === content ? 'preserve' : 'merge', content });
       continue;
@@ -482,16 +506,28 @@ function plan(root, profiles, agents, allowMerge = false) {
       continue;
     }
     const record = manifest?.managedFiles?.[path];
-    if (record?.kind === 'generated' && record.sha256 === sha(current)) {
+    if (record?.kind === 'generated' && record.mode === 'preserved') {
+      actions.push({
+        path,
+        action: 'keep',
+        content: null,
+        reason: `existed with this content before install, so it is yours and upgrades never touch it. To adopt the tool version, run "apply <repo> --write --replace ${path}".`,
+      });
+    } else if (record?.kind === 'generated' && record.sha256 === sha(current)) {
       actions.push({ path, action: 'update-generated', content });
+    } else if (record?.kind === 'generated') {
+      actions.push({
+        path,
+        action: 'keep',
+        content: null,
+        reason: `edited after install, so this upgrade skips it and your version stays. ${restoreAdvice(path)}`,
+      });
     } else {
       actions.push({
         path,
         action: 'conflict',
         content: null,
-        reason: record
-          ? 'this tool created the file but it was edited afterwards. Keep your edits (the tool will skip it) or restore the original with "git checkout" and run apply again.'
-          : 'the file already exists and was not created by this tool. Keep your version by moving it aside, or drop the profile that ships it (--profiles).',
+        reason: 'the file already exists and was not created by this tool. Keep your version by moving it aside, or drop the profile that ships it (--profiles).',
       });
     }
   }
@@ -516,7 +552,10 @@ function plan(root, profiles, agents, allowMerge = false) {
     const action = !existsSync(absolute) ? 'create' : read(absolute) === content ? 'preserve' : 'merge';
     actions.push({ path, action, content });
   }
-  return { root, profiles, agents, actions, previousManifest: manifest };
+  // Files from an earlier apply that the selected profiles no longer ship stay tracked while they exist.
+  const planned = new Set(actions.map((action) => action.path));
+  const orphans = Object.keys(manifest?.managedFiles ?? {}).filter((path) => !planned.has(path) && existsSync(join(root, path)));
+  return { root, profiles, agents, actions, orphans, previousManifest: manifest };
 }
 
 function audit(root) {
@@ -587,13 +626,23 @@ function printPlan(value, asJson) {
   console.log(`Agents:     ${value.agents.join(', ')}`);
   console.log('');
   for (const action of value.actions) {
-    console.log(`  ${action.action.padEnd(17)} ${action.path}`);
+    console.log(`  ${action.action.padEnd(17)} ${action.path}${action.replaced ? '   (--replace: tool version written, now tool-owned)' : ''}`);
   }
   console.log(
     '\nAction words: create = new file; preserve = already correct, left alone; update = managed block refreshed; ' +
-      'update-generated = tool-owned file upgraded; merge = your file kept, tool entries added; ' +
-      'conflict = file exists and this tool does not own it, so nothing is written.',
+      'update-generated = tool-owned file upgraded; keep = tool-owned file you edited, left alone, upgrade skipped; ' +
+      'merge = your file kept, tool entries added; conflict = file exists and this tool does not own it, so nothing is written.',
   );
+  const kept = value.actions.filter((action) => action.action === 'keep');
+  if (kept.length) {
+    console.log('\nKept as they are (edited by you after install):');
+    for (const action of kept) console.log(`  - ${action.path}: ${action.reason}`);
+  }
+  if (value.orphans?.length) {
+    console.log(
+      `\nStill tracked but no longer in the selected profiles (uninstall removes them; delete by hand if you want them gone now): ${value.orphans.join(', ')}`,
+    );
+  }
   const conflicts = value.actions.filter((action) => action.action === 'conflict');
   if (!conflicts.length) {
     console.log('\nNo conflicts. Apply can run.');
@@ -620,7 +669,7 @@ function applyPlan(value) {
   const rollback = [];
   try {
     for (const action of value.actions) {
-      if (action.action === 'preserve') continue;
+      if (action.action === 'preserve' || action.action === 'keep') continue;
       const path = safePath(value.root, join(value.root, action.path));
       const before = existsSync(path) ? read(path) : null;
       atomicWrite(path, action.content);
@@ -633,6 +682,10 @@ function applyPlan(value) {
       const path = join(value.root, action.path);
       if (!existsSync(path)) continue;
       const previous = value.previousManifest?.managedFiles?.[action.path];
+      if (action.action === 'keep' && previous) {
+        managedFiles[action.path] = previous; // install-time hash stays, so uninstall still sees the edit
+        continue;
+      }
       if (action.path === 'AGENTS.md') {
         const block = managedBlock(read(path), AGENTS_START, AGENTS_END);
         managedFiles[action.path] = { kind: 'managed-block', mode: installMode(action.action, previous), sha256: sha(block ?? '') };
@@ -641,8 +694,21 @@ function applyPlan(value) {
       } else if (Object.values(hookConfigs).includes(action.path)) {
         managedFiles[action.path] = { kind: 'semantic', mode: installMode(action.action, previous) };
       } else {
-        managedFiles[action.path] = { kind: 'generated', sha256: sha(read(path)) };
+        // 'preserved' = the file already had this exact content before the first apply; uninstall leaves it.
+        // Written fresh (create) or on request (--replace): ours from now on, whatever the file was before.
+        const mode =
+          action.action === 'create' || action.replaced
+            ? 'created'
+            : previous
+              ? previous.mode ?? 'created'
+              : action.action === 'preserve'
+                ? 'preserved'
+                : 'created';
+        managedFiles[action.path] = { kind: 'generated', mode, sha256: sha(read(path)) };
       }
+    }
+    for (const path of value.orphans ?? []) {
+      managedFiles[path] = value.previousManifest.managedFiles[path];
     }
     const manifest = {
       schemaVersion: 1,
@@ -693,9 +759,13 @@ function uninstallPlan(root, force) {
       continue;
     }
     const current = read(absolute);
-    const mode = record.mode ?? 'appended';
+    const mode = record.mode ?? (record.kind === 'generated' ? 'created' : 'appended');
 
     if (record.kind === 'generated') {
+      if (mode === 'preserved') {
+        push(path, 'keep', { reason: 'existed with this content before install; not ours to delete' });
+        continue;
+      }
       const unchanged = sha(current) === record.sha256;
       if (unchanged) push(path, 'delete');
       else if (force) push(path, 'delete', { reason: 'edited after install; deleted because --force was given' });
@@ -817,8 +887,11 @@ function verify(root) {
       errors.push(`managed file is missing: ${path}. It was created by cross-agent-sdd; run "apply <repo> --write" to restore it.`);
       continue;
     }
-    if (record.kind === 'generated' && sha(read(absolute)) !== record.sha256) {
-      errors.push(`managed file changed outside installer: ${path}. Tool-owned files are not meant to be edited by hand. Restore it with "git checkout -- ${path}" or "apply --write"; if the edit is intended, keep it and expect upgrades to skip this file.`);
+    // Preserved files existed before install with the tool's content; they are the repository's, not ours.
+    if (record.kind === 'generated' && record.mode !== 'preserved' && sha(read(absolute)) !== record.sha256) {
+      errors.push(
+        `managed file changed outside installer: ${path}. If the edit is intended, keep it: upgrades skip this file (plan shows "keep"). ${restoreAdvice(path)}`,
+      );
     }
     if (record.kind === 'managed-block') {
       const block = managedBlock(read(absolute), AGENTS_START, AGENTS_END);
@@ -1013,7 +1086,11 @@ Things this tool cannot undo for you:
   }
 
   const { profiles, agents } = selected(parsed, root);
-  const value = plan(root, profiles, agents, flag(parsed, 'merge-agents', false));
+  const replace = String(flag(parsed, 'replace', '') || '')
+    .split(',')
+    .map((item) => item.trim().replaceAll('\\', '/').replace(/^\.\//, ''))
+    .filter(Boolean);
+  const value = plan(root, profiles, agents, flag(parsed, 'merge-agents', false), replace);
   if (command === 'plan') {
     printPlan(value, flag(parsed, 'json', false));
     if (!flag(parsed, 'json', false)) console.log('\nPlan wrote nothing. Next: run "apply <repo> --write" to create these files.');
@@ -1028,7 +1105,8 @@ Things this tool cannot undo for you:
     }
     applyPlan(value);
     console.log(`\nApplied cross-agent-sdd ${VERSION}. Next steps:
-  1. Open .agent-sdd/config.json and make sure "runtimeRoots" lists the folders that hold application code.
+  1. Open .agent-sdd/config.json: make sure "runtimeRoots" lists the folders that hold application code, and
+     add archived docs (old plans, samples) to "exclude" so their stale links do not fail the gate.
   2. Run "node scripts/check-sdd.mjs" and fix what it reports. Each line says what is wrong and how to fix it.
   3. Wire the gate into Git hooks and CI:
        pre-commit:  node scripts/check-sdd.mjs

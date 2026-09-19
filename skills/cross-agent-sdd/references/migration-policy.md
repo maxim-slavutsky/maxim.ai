@@ -8,7 +8,8 @@ Read when audit reports existing instructions, specs, hooks, gates, or conflicti
 |---|---|
 | Absent | Safe to create after plan review |
 | Generated + unchanged | Safe to upgrade |
-| Generated + locally modified | Conflict; reconcile against recorded base |
+| Generated + locally modified | Kept as is (`keep`); upgrade skips it. To take the tool version: `apply --write --replace <path>` |
+| Pre-existing, identical to template at first apply (`mode: preserved`) | Repository-owned. Never upgraded, never policed by `verify`, never deleted by `uninstall`. Adopt with `apply --write --replace <path>` |
 | User-owned compatible | Preserve; add link or managed block only after review |
 | User-owned conflicting | Stop and choose canonical owner explicitly |
 

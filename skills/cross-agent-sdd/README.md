@@ -37,7 +37,7 @@ Options:
 | Option | Meaning | Default |
 |---|---|---|
 | `--scope user` | Copy into your home folder, available in every repository | yes |
-| `--scope project --repo <path>` | Copy into one repository only (`.claude/skills`, `.agents/skills`) | |
+| `--scope project --repo <path>` | Copy into one repository only (`.claude/skills`, `.agents/skills`). The gate ignores these copies. Other AI tool skills you keep in-repo go into `exclude` in `.agent-sdd/config.json`. | |
 | `--agents claude,codex,cursor` | Which tools get a copy; Codex and Cursor share one folder | `all` |
 | `--cursor-cloud` | Also copy into `~/.cursor/skills` (only needed for Cursor Cloud sync) | off |
 | `--force` | Replace a copy this installer made earlier (upgrade) | off |
@@ -155,13 +155,19 @@ Options for `plan` and `apply`:
 | `--profiles core,sdd,config,helm` or `full` | File sets to install. `core` and `sdd` are always included. Default: `core,sdd`, or whatever `.agent-sdd/config.json` already says. |
 | `--agents all` or `claude,codex,cursor` | Tools to configure. Default: all three. |
 | `--merge-agents` | Append the managed block to an existing `AGENTS.md` and the `@AGENTS.md` import to an existing `CLAUDE.md`. Read both files first. |
+| `--replace <path>[,<path>]` | Write the tool version of these tool-owned files even if you edited them or they existed before install. They become tool-owned: upgrades update them, `uninstall` deletes them. |
 | `--allow-dirty` | Apply with uncommitted changes present. Not recommended: you lose the clean one-diff review. |
 | `--write` | Actually write. Without it, `apply` is a dry run. |
 | `--json` | Machine-readable output. |
 
 Plan action words: `create` new file; `preserve` already correct; `update` managed block refreshed;
-`update-generated` tool-owned file upgraded (hash matched); `merge` your file kept, tool entries added;
-`conflict` file exists and the tool does not own it, nothing is written.
+`update-generated` tool-owned file upgraded (hash matched); `keep` left alone and skipped by this upgrade, either
+a tool-owned file you edited or a file that already existed with the tool's content before the first apply;
+`merge` your file kept, tool entries added; `conflict` file exists and the tool does not own it, nothing is
+written.
+
+Files from an earlier apply that your current `--profiles` no longer include stay on disk and stay tracked.
+The plan lists them; `uninstall` removes them, or delete them by hand.
 
 Exit codes: `0` success or clean dry run, `1` any error, conflict, or failed verification.
 
@@ -174,6 +180,13 @@ Installed at `scripts/check-sdd.mjs`. Three modes:
 | `node scripts/check-sdd.mjs` | pre-commit hook, CI, any time | Markdown links resolve; every `AGENTS.md`/`SPEC.md` is linked from somewhere; SPEC ids unique; critical invariants have `@spec` evidence in a test file; Claude/Codex/Cursor files have their partners; `.cursor/rules` match `.claude/rules`; hook configs call the shared script; config groups and Helm charts (when those profiles are on). |
 | `node scripts/check-sdd.mjs --staged --commit-msg <path>` | commit-msg hook (`$1`) | Everything above plus: staged application files changed with their owning `SPEC.md`/`AGENTS.md`, or the message carries an accepted `Spec-Impact: none -` line; harness files changed with partners, or `Agent-Parity: none -`. |
 | `node scripts/check-sdd.mjs --changed [--base <ref>]` | CI | Same per-commit checks for every commit since the base, honoring `.agent-sdd/waivers.json`. |
+
+CI must run both the static command and `--changed`. The static command alone passes a commit that changed
+code without its `SPEC.md`, because it never looks at what a commit changed. Example CI step:
+
+```bash
+node scripts/check-sdd.mjs && node scripts/check-sdd.mjs --changed
+```
 
 Base for `--changed`, first match wins: `--base`, `SDD_BASE_REF`, `origin/<CHANGE_TARGET>` then
 `<CHANGE_TARGET>`, `GIT_PREVIOUS_COMMIT`, `GIT_PREVIOUS_SUCCESSFUL_COMMIT`, `HEAD^`. An explicit value that
@@ -207,7 +220,22 @@ Every message ends with what to do. The most frequent ones:
 | `harness paths lack partner change` | A Claude/Codex/Cursor file changed alone. | Change the partner files too, or add `Agent-Parity: none - <reason>`. |
 | `.cursor/rules/<name>.mdc stale` | A Claude rule changed, the Cursor mirror did not. | `node scripts/gen-cursor-rules.mjs`, commit both. |
 | `unreachable SPEC.md` | Nothing links to that spec. | Link it from the nearest `AGENTS.md` or `README.md`. |
-| `managed file changed outside installer` (from `verify`) | A tool-owned file was hand-edited. | Restore it with `git checkout -- <path>` or `apply --write`, or keep the edit and accept that upgrades skip it. |
+| `managed file changed outside installer` (from `verify`) | A tool-owned file was hand-edited. | Keep the edit: `apply` then lists the file as `keep` and skips it on every upgrade, so you own it from now on. Or take the tool version back, see [Taking the tool version back](#taking-the-tool-version-back). Prefer `.agent-sdd/config.json` (`exclude`, `runtimeRoots`, `configGroups`) over editing the gate script, so upgrades keep working. |
+
+### Taking the tool version back
+
+One command, the same for an edit you committed and for a file that existed before install:
+
+```bash
+node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs apply . --write --replace scripts/check-sdd.mjs
+```
+
+The file gets the tool version and becomes tool-owned: later upgrades update it and `uninstall` deletes it.
+Several files: separate the paths with commas. Commit or discard other changes first, as for any `apply`.
+Then commit the result; `verify` is green again.
+
+Do not delete the file and commit the deletion first. The pre-commit hook runs the gate, and that commit fails
+while `scripts/check-sdd.mjs` is missing.
 
 ## Uninstall
 
@@ -230,6 +258,7 @@ What happens:
 | Kind of file | What uninstall does |
 |---|---|
 | Files the tool created (workflows, adapters, gate, hooks script, generated Cursor rules) | Deleted, if unchanged since install. Edited copies are kept and reported; add `--force` to delete them too. |
+| Files that already had the same content before install | Kept. The tool never created them, so it never deletes them. |
 | `AGENTS.md`, `CLAUDE.md`, `.gitignore` | Only the cross-agent-sdd block or line is removed; your text stays. A file the tool created and that holds nothing else is deleted. |
 | `.claude/settings.json`, `.codex/hooks.json`, `.cursor/hooks.json` | Only the reminder hook entry is removed; your other hooks and settings stay. A file the tool created and that holds nothing else is deleted. |
 | `.agent-sdd/config.json`, `.agent-sdd/waivers.json`, `.agent-toolchain.json` | Deleted (Git history keeps them). |

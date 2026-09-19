@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -430,6 +431,7 @@ test('help, dry runs, and the applied summary explain themselves to a newcomer',
   assert.match(applied.stdout, /Next steps:/);
   assert.match(applied.stdout, /node scripts\/check-sdd\.mjs/);
   assert.match(applied.stdout, /pre-commit/);
+  assert.match(applied.stdout, /old plans, samples[^\n]*"exclude"/);
 
   const install = run(['install-skill', '--scope', 'project', '--repo', root]);
   assert.equal(install.status, 0, install.stderr);
@@ -602,4 +604,277 @@ test('asset templates never use harness-discoverable directory names', () => {
   for (const name of names) assert.doesNotMatch(name, /^\./, `asset dir ${name} would be loaded as a live harness dir`);
   assert.ok(existsSync(join(assetRoot, '_claude', 'rules', 'spec-first.md')));
   assert.ok(existsSync(join(assetRoot, '_agents', 'skills', 'spec-first', 'SKILL.md')));
+});
+
+test('uninstall removes only its own hook command and keeps a user hook beside it [@spec cross-agent-sdd.gates:V6]', () => {
+  const root = installed();
+  const path = join(root, '.claude', 'settings.json');
+  const settings = JSON.parse(readFileSync(path, 'utf8'));
+  settings.hooks.PostToolUse[0].hooks.push({ type: 'command', command: 'node scripts/my-lint.mjs' });
+  writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'chore: add my own hook beside the reminder']);
+
+  const dry = run(['uninstall', root]);
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /edit\s+\.claude\/settings\.json/);
+
+  const removed = run(['uninstall', root, '--write', '--yes']);
+  assert.equal(removed.status, 0, removed.stderr);
+  const after = JSON.parse(readFileSync(path, 'utf8'));
+  const commands = after.hooks.PostToolUse.flatMap((entry) => entry.hooks.map((hook) => hook.command));
+  assert.deepEqual(commands, ['node scripts/my-lint.mjs']);
+});
+
+test('uninstall keeps a file that existed with template content before install [@spec cross-agent-sdd.gates:V6]', () => {
+  const root = fixture();
+  const relPath = 'docs/workflows/SPEC-FIRST-WORKFLOW.md';
+  const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', relPath), 'utf8');
+  mkdirSync(join(root, 'docs', 'workflows'), { recursive: true });
+  writeFileSync(join(root, relPath), template, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'docs: workflow already present']);
+
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  const manifest = JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8'));
+  assert.equal(manifest.managedFiles[relPath].mode, 'preserved');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'chore: install cross-agent SDD']);
+
+  const removed = run(['uninstall', root, '--write', '--yes']);
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.match(removed.stdout, /keep\s+docs\/workflows\/SPEC-FIRST-WORKFLOW\.md.*before install/);
+  assert.equal(readFileSync(join(root, relPath), 'utf8'), template);
+
+  // A file this tool created stays deletable after a second apply finds it unchanged.
+  const root2 = installed();
+  assert.equal(run(['apply', root2, '--write']).status, 0); // idempotent: nothing changes, tree stays clean
+  const dry2 = run(['uninstall', root2]);
+  assert.match(dry2.stdout, /delete\s+docs\/workflows\/SPEC-FIRST-WORKFLOW\.md/);
+});
+
+test('gate ignores the skill installed into the repository by install-skill --scope project [@spec cross-agent-sdd.gates:V9]', () => {
+  const root = fixture();
+  const install = run(['install-skill', '--scope', 'project', '--repo', root, '--agents', 'all', '--write']);
+  assert.equal(install.status, 0, install.stderr);
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'chore: install skill into the repository']);
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  const checked = gate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('a hook config change needs every other enabled hook config, never itself [@spec cross-agent-sdd.gates:V8]', () => {
+  const root = installed();
+  const message = join(root, 'msg.txt');
+  writeFileSync(message, 'chore: widen matcher\n', 'utf8');
+  const widen = (relPath, from, to) => {
+    const path = join(root, relPath);
+    writeFileSync(path, readFileSync(path, 'utf8').replace(from, to), 'utf8');
+    git(root, ['add', relPath]);
+  };
+
+  widen('.claude/settings.json', 'Edit|Write', 'Edit|Write|MultiEdit');
+  let checked = gate(root, ['--staged', '--commit-msg', message]);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /harness paths lack partner change: \.claude\/settings\.json/);
+
+  widen('.codex/hooks.json', '"timeout": 5', '"timeout": 6');
+  checked = gate(root, ['--staged', '--commit-msg', message]);
+  assert.notEqual(checked.status, 0, 'two of three configs is still not parity');
+
+  widen('.cursor/hooks.json', '"timeout": 5', '"timeout": 6');
+  checked = gate(root, ['--staged', '--commit-msg', message]);
+  assert.equal(checked.status, 0, checked.stderr);
+
+  git(root, ['reset', '-q', '--hard']);
+  const script = 'scripts/hooks/post-edit-reminder.mjs';
+  writeFileSync(join(root, script), `${readFileSync(join(root, script), 'utf8')}\n// note\n`, 'utf8');
+  git(root, ['add', script]);
+  checked = gate(root, ['--staged', '--commit-msg', message]);
+  assert.equal(checked.status, 0, `the hook script alone needs no partner: ${checked.stderr}`);
+});
+
+test('docs tell CI to run the per-commit gate, not only the static one', () => {
+  const ciMentionsChanged = /\bCI\b[^\n]*--changed|--changed[^\n]*\bCI\b/;
+  assert.match(readFileSync(join(SKILL_ROOT, 'references', 'configuration.md'), 'utf8'), ciMentionsChanged);
+  assert.match(readFileSync(join(SKILL_ROOT, 'SKILL.md'), 'utf8'), ciMentionsChanged);
+  assert.match(readFileSync(join(SKILL_ROOT, 'README.md'), 'utf8'), /static[^\n]*alone[^\n]*--changed|--changed[^\n]*static[^\n]*alone/i);
+});
+
+test('re-apply with fewer profiles keeps ownership of files still on disk [@spec cross-agent-sdd.gates:V7]', () => {
+  const root = fixture();
+  const full = run(['apply', root, '--write', '--profiles', 'core,sdd,helm']);
+  assert.equal(full.status, 0, full.stderr);
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'chore: install with helm']);
+
+  const shrunk = run(['apply', root, '--write', '--profiles', 'core,sdd']);
+  assert.equal(shrunk.status, 0, shrunk.stderr);
+  assert.match(shrunk.stdout, /no longer in the selected profiles[^\n]*HELM-VALIDATION-WORKFLOW\.md/);
+  const manifest = JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8'));
+  assert.ok(manifest.managedFiles['docs/workflows/HELM-VALIDATION-WORKFLOW.md'], 'record kept');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'chore: drop helm profile']);
+
+  const dry = run(['uninstall', root]);
+  assert.match(dry.stdout, /delete\s+docs\/workflows\/HELM-VALIDATION-WORKFLOW\.md/);
+});
+
+test('apply skips a generated file you edited and upgrades the rest [@spec cross-agent-sdd.gates:V7]', () => {
+  const root = installed();
+  const manifestPath = join(root, '.agent-toolchain.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const originalGateSha = manifest.managedFiles['scripts/check-sdd.mjs'].sha256;
+
+  const gatePath = join(root, 'scripts', 'check-sdd.mjs');
+  writeFileSync(gatePath, `${readFileSync(gatePath, 'utf8')}\n// local tweak\n`, 'utf8');
+  // Simulate an older installed version of one workflow: content and recorded hash agree, template differs.
+  const workflowRel = 'docs/workflows/COMMIT-WORKFLOW.md';
+  writeFileSync(join(root, workflowRel), 'old generated content\n', 'utf8');
+  manifest.managedFiles[workflowRel].sha256 = createHash('sha256').update('old generated content\n').digest('hex');
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'chore: local gate tweak and stale workflow']);
+
+  const planned = run(['plan', root]);
+  assert.equal(planned.status, 0, planned.stderr);
+  assert.match(planned.stdout, /keep\s+scripts\/check-sdd\.mjs/);
+  assert.match(planned.stdout, /update-generated\s+docs\/workflows\/COMMIT-WORKFLOW\.md/);
+  assert.match(planned.stdout, /No conflicts\. Apply can run\./);
+
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.match(applied.stdout, /scripts\/check-sdd\.mjs[^\n]*edited/);
+  assert.match(readFileSync(gatePath, 'utf8'), /local tweak/);
+  const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', workflowRel), 'utf8');
+  assert.equal(readFileSync(join(root, workflowRel), 'utf8'), template);
+
+  const after = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  assert.equal(after.managedFiles['scripts/check-sdd.mjs'].sha256, originalGateSha, 'record keeps the install-time hash');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'chore: upgrade']);
+  const dry = run(['uninstall', root]);
+  assert.match(dry.stdout, /keep\s+scripts\/check-sdd\.mjs.*edited/);
+});
+
+test('apply never upgrades a preserved file and verify does not police it [@spec cross-agent-sdd.gates:V7]', () => {
+  const root = fixture();
+  const relPath = 'docs/workflows/SPEC-FIRST-WORKFLOW.md';
+  const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', relPath), 'utf8');
+  mkdirSync(join(root, 'docs', 'workflows'), { recursive: true });
+  writeFileSync(join(root, relPath), template, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'docs: workflow already present']);
+  assert.equal(run(['apply', root, '--write']).status, 0);
+
+  // Simulate a newer template: the preserved file and its record still agree, the template no longer does.
+  const teamVersion = 'the team wrote this before the tool arrived\n';
+  const manifestPath = join(root, '.agent-toolchain.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  writeFileSync(join(root, relPath), teamVersion, 'utf8');
+  manifest.managedFiles[relPath].sha256 = createHash('sha256').update(teamVersion).digest('hex');
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'chore: install']);
+
+  const planned = run(['plan', root]);
+  assert.match(planned.stdout, /keep\s+docs\/workflows\/SPEC-FIRST-WORKFLOW\.md/);
+  assert.match(planned.stdout, /SPEC-FIRST-WORKFLOW\.md: existed[^\n]*before install/);
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(readFileSync(join(root, relPath), 'utf8'), teamVersion);
+
+  // Their file, their edits: verify does not report it as a tool file changed outside the installer.
+  writeFileSync(join(root, relPath), 'edited again by the team\n', 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'docs: team edit']);
+  const verified = run(['verify', root]);
+  assert.doesNotMatch(`${verified.stdout}${verified.stderr}`, /changed outside installer: docs\/workflows\/SPEC-FIRST-WORKFLOW\.md/);
+});
+
+test('apply --replace takes the tool version back with the documented pre-commit hook installed', () => {
+  const root = installed();
+  // The documented pre-commit hook: the gate runs before every commit, so the file must never be missing.
+  writeFileSync(join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nnode scripts/check-sdd.mjs\n', { encoding: 'utf8', mode: 0o755 });
+  const gatePath = join(root, 'scripts', 'check-sdd.mjs');
+  const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', 'scripts', 'check-sdd.mjs'), 'utf8');
+  writeFileSync(gatePath, `${readFileSync(gatePath, 'utf8')}\n// local tweak\n`, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'chore: customize gate']);
+
+  const verified = run(['verify', root]);
+  assert.notEqual(verified.status, 0);
+  const output = `${verified.stdout}${verified.stderr}`;
+  assert.match(output, /changed outside installer: scripts\/check-sdd\.mjs/);
+  assert.match(output, /apply <repo> --write --replace scripts\/check-sdd\.mjs/);
+  assert.doesNotMatch(output, /git rm|git checkout/);
+
+  // Proof the hook is live: a commit without the gate file fails, so "delete, commit, apply" is no procedure.
+  git(root, ['rm', '-q', 'scripts/check-sdd.mjs']);
+  assert.throws(() => git(root, ['commit', '-m', 'chore: drop gate']), /Cannot find module|MODULE_NOT_FOUND/);
+  git(root, ['reset', '-q', '--hard']);
+
+  const applied = run(['apply', root, '--write', '--replace', 'scripts/check-sdd.mjs']);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.match(applied.stdout, /update-generated\s+scripts\/check-sdd\.mjs/);
+  assert.equal(readFileSync(gatePath, 'utf8'), template);
+  git(root, ['add', '.']);
+  git(root, ['commit', '-m', 'chore: take the tool gate back']); // hook runs the restored gate
+  const again = run(['verify', root]);
+  assert.equal(again.status, 0, `${again.stdout}${again.stderr}`);
+
+  const unknown = run(['apply', root, '--write', '--replace', 'src/app.ts']);
+  assert.notEqual(unknown.status, 0);
+  assert.match(unknown.stderr, /--replace src\/app\.ts/);
+});
+
+test('a workflow back-link to the Claude rule covers its generated Cursor mirror [@spec cross-agent-sdd.gates:V5]', () => {
+  const root = installed();
+  const workflow = join(root, 'docs', 'workflows', 'SPEC-FIRST-WORKFLOW.md');
+  const withoutMirrorLink = readFileSync(workflow, 'utf8').replace(/^- \[Cursor rule\]\(\.\.\/\.\.\/\.cursor\/rules\/spec-first\.mdc\)\r?\n/m, '');
+  assert.notEqual(withoutMirrorLink, readFileSync(workflow, 'utf8'), 'fixture must drop the .mdc link');
+  writeFileSync(workflow, withoutMirrorLink, 'utf8');
+  let checked = gate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+
+  // Without the rule link either, the gate names the source rule, not only the mirror.
+  writeFileSync(workflow, withoutMirrorLink.replace(/^- \[Claude Code rule\]\(\.\.\/\.\.\/\.claude\/rules\/spec-first\.md\)\r?\n/m, ''), 'utf8');
+  checked = gate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /does not link back to \.claude\/rules\/spec-first\.md/);
+});
+
+test('adopting a preserved file makes it tool-owned, by --replace or by delete and re-apply [@spec cross-agent-sdd.gates:V7]', () => {
+  const relPath = 'docs/workflows/SPEC-FIRST-WORKFLOW.md';
+  const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', relPath), 'utf8');
+  const preserved = () => {
+    const root = fixture();
+    mkdirSync(join(root, 'docs', 'workflows'), { recursive: true });
+    writeFileSync(join(root, relPath), template, 'utf8');
+    git(root, ['add', '.']);
+    git(root, ['commit', '-m', 'docs: workflow already present']);
+    assert.equal(run(['apply', root, '--write']).status, 0);
+    git(root, ['add', '.']);
+    git(root, ['commit', '-m', 'chore: install']);
+    assert.equal(JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8')).managedFiles[relPath].mode, 'preserved');
+    return root;
+  };
+  const mode = (root) => JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8')).managedFiles[relPath].mode;
+
+  const byReplace = preserved();
+  const replaced = run(['apply', byReplace, '--write', '--replace', relPath]);
+  assert.equal(replaced.status, 0, replaced.stderr);
+  assert.equal(mode(byReplace), 'created');
+  git(byReplace, ['add', '.']);
+  git(byReplace, ['commit', '-m', 'chore: adopt']);
+  assert.match(run(['uninstall', byReplace]).stdout, /delete\s+docs\/workflows\/SPEC-FIRST-WORKFLOW\.md/);
+
+  const byDelete = preserved();
+  git(byDelete, ['rm', '-q', relPath]);
+  git(byDelete, ['commit', '-m', 'chore: drop the old copy']);
+  assert.equal(run(['apply', byDelete, '--write']).status, 0);
+  assert.equal(mode(byDelete), 'created');
 });
