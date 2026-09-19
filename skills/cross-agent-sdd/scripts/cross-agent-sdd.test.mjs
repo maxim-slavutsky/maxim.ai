@@ -479,6 +479,123 @@ test('post-edit reminder tells the agent what to do next in plain words', () => 
   assert.match(context, /node scripts\/check-sdd\.mjs/);
 });
 
+function preExistingRepo() {
+  const root = fixture();
+  writeFileSync(join(root, 'AGENTS.md'), '# Acme notes\n\n- Deploy only through make deploy.\n', 'utf8');
+  writeFileSync(join(root, 'CLAUDE.md'), '# Claude notes\n\nRun make lint first.\n', 'utf8');
+  writeFileSync(join(root, '.gitignore'), 'node_modules\n.env\n', 'utf8');
+  mkdirSync(join(root, '.claude'), { recursive: true });
+  writeFileSync(
+    join(root, '.claude', 'settings.json'),
+    `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node scripts/guard.mjs' }] }] }, permissions: { deny: ['Bash(kubectl:*)'] } }, null, 2)}\n`,
+    'utf8',
+  );
+  mkdirSync(join(root, 'src'), { recursive: true });
+  writeFileSync(join(root, 'src', 'SPEC.md'), '---\nid: acme.core\n---\n\n# Core\n\nV1: Fixture holds.\n', 'utf8');
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\n[core](src/SPEC.md)\n', 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'chore: pre-existing repository']);
+  return root;
+}
+
+test('uninstall is a dry run by default and refuses --write without confirmation [@spec cross-agent-sdd.gates:V6]', () => {
+  const root = installed();
+  const before = tree(root);
+
+  const dry = run(['uninstall', root]);
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /delete\s+scripts\/check-sdd\.mjs/);
+  assert.match(dry.stdout, /nothing was changed/i);
+  assert.match(dry.stdout, /--write/);
+  assert.deepEqual(tree(root), before);
+
+  const unconfirmed = run(['uninstall', root, '--write'], { input: '' });
+  assert.notEqual(unconfirmed.status, 0);
+  assert.match(unconfirmed.stderr, /confirmation/i);
+  assert.match(unconfirmed.stderr, /--yes/);
+  assert.deepEqual(tree(root), before);
+});
+
+test('uninstall --write --yes removes only what apply added and restores user files [@spec cross-agent-sdd.gates:V6]', () => {
+  const root = preExistingRepo();
+  const original = tree(root);
+  const applied = run(['apply', root, '--write', '--merge-agents']);
+  assert.equal(applied.status, 0, applied.stderr);
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'chore: install']);
+  assert.ok(existsSync(join(root, '.agent-toolchain.json')));
+
+  const removed = run(['uninstall', root, '--write', '--yes']);
+  assert.equal(removed.status, 0, `${removed.stdout}\n${removed.stderr}`);
+  assert.match(removed.stdout, /Uninstalled cross-agent-sdd/);
+  assert.match(removed.stdout, /pre-commit/);
+
+  const after = tree(root);
+  assert.deepEqual([...after.keys()].sort(), [...original.keys()].sort());
+  for (const [path, content] of original) {
+    assert.equal(after.get(path).replaceAll('\r\n', '\n'), content.replaceAll('\r\n', '\n'), `${path} restored`);
+  }
+  for (const dir of ['.agents', '.codex', '.cursor', 'docs', 'scripts', '.agent-sdd', '.claude/rules', '.claude/skills']) {
+    assert.equal(existsSync(join(root, dir)), false, `${dir} removed`);
+  }
+  assert.ok(existsSync(join(root, '.claude', 'settings.json')));
+});
+
+test('uninstall on a bare repository deletes files it created outright', () => {
+  const root = installed();
+  const removed = run(['uninstall', root, '--write', '--yes']);
+  assert.equal(removed.status, 0, `${removed.stdout}\n${removed.stderr}`);
+  assert.deepEqual([...tree(root).keys()], ['README.md']);
+  assert.deepEqual(readdirSync(root).filter((name) => name !== '.git'), ['README.md']);
+});
+
+test('uninstall keeps a generated file that was edited unless --force is given', () => {
+  const root = installed();
+  const workflow = join(root, 'docs', 'workflows', 'COMMIT-WORKFLOW.md');
+  writeFileSync(workflow, `${readFileSync(workflow, 'utf8')}\nLocal addition.\n`, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'docs: local tweak']);
+
+  const kept = run(['uninstall', root, '--write', '--yes']);
+  assert.equal(kept.status, 0, `${kept.stdout}\n${kept.stderr}`);
+  assert.match(kept.stdout, /keep\s+docs\/workflows\/COMMIT-WORKFLOW\.md.*edited/);
+  assert.ok(existsSync(workflow));
+  assert.equal(existsSync(join(root, '.agent-toolchain.json')), false);
+  assert.equal(existsSync(join(root, 'scripts', 'check-sdd.mjs')), false);
+
+  const root2 = installed();
+  const workflow2 = join(root2, 'docs', 'workflows', 'COMMIT-WORKFLOW.md');
+  writeFileSync(workflow2, 'edited\n', 'utf8');
+  git(root2, ['add', '.']);
+  git(root2, ['commit', '-q', '-m', 'docs: local tweak']);
+  const forced = run(['uninstall', root2, '--write', '--yes', '--force']);
+  assert.equal(forced.status, 0, forced.stderr);
+  assert.equal(existsSync(workflow2), false);
+});
+
+test('uninstall-skill removes only installer-owned copies after confirmation', () => {
+  const root = fixture();
+  const install = run(['install-skill', '--scope', 'project', '--repo', root, '--agents', 'all', '--write']);
+  assert.equal(install.status, 0, install.stderr);
+  mkdirSync(join(root, '.claude', 'skills', 'mine'), { recursive: true });
+  writeFileSync(join(root, '.claude', 'skills', 'mine', 'SKILL.md'), '---\nname: mine\n---\n', 'utf8');
+
+  const dry = run(['uninstall-skill', '--scope', 'project', '--repo', root]);
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /dry run/i);
+  assert.ok(existsSync(join(root, '.claude', 'skills', SKILL_NAME, 'SKILL.md')));
+
+  const unconfirmed = run(['uninstall-skill', '--scope', 'project', '--repo', root, '--write'], { input: '' });
+  assert.notEqual(unconfirmed.status, 0);
+  assert.match(unconfirmed.stderr, /--yes/);
+
+  const removed = run(['uninstall-skill', '--scope', 'project', '--repo', root, '--write', '--yes']);
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.equal(existsSync(join(root, '.claude', 'skills', SKILL_NAME)), false);
+  assert.equal(existsSync(join(root, '.agents', 'skills', SKILL_NAME)), false);
+  assert.ok(existsSync(join(root, '.claude', 'skills', 'mine', 'SKILL.md')));
+});
+
 test('asset templates never use harness-discoverable directory names', () => {
   const assetRoot = join(SKILL_ROOT, 'assets', 'repository');
   const names = readdirSync(assetRoot);

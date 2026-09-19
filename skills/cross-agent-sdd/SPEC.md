@@ -6,6 +6,7 @@ critical:
   - V3
   - V4
   - V5
+  - V6
 ---
 
 # Cross-agent SDD generated gates
@@ -29,6 +30,10 @@ words}` skips named gates for that commit in `--changed` only. `--staged` ⊥ re
 gate fail.
 V5: codex enabled → ∀ `.agents/skills/<n>` ! `agents/openai.yaml`. ∀ adapter (`.claude/skills`, `.agents/skills`,
 `.claude/rules`, `.cursor/rules`) links exactly 1 `docs/workflows/*.md`; that workflow links adapter back.
+V6: `uninstall` touches only `.agent-toolchain.json`-owned content. Generated file deleted only when hash
+matches record (| `--force`). Appended block | line | hook entry removed, rest of file kept; file deleted only
+when install created it & nothing else remains. Mode `preserved` → untouched. Dry run default; `--write` needs
+typed `uninstall` on TTY | `--yes`; non-TTY w/o `--yes` → refuse, nothing changed.
 
 ## Bugs
 

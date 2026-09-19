@@ -44,10 +44,19 @@ node <skill>/scripts/cross-agent-sdd.mjs audit <repo> [--json]
 node <skill>/scripts/cross-agent-sdd.mjs plan <repo> [--profiles core,sdd,config,helm] [--agents all]
 node <skill>/scripts/cross-agent-sdd.mjs apply <repo> --write [--merge-agents] [--allow-dirty]
 node <skill>/scripts/cross-agent-sdd.mjs verify <repo>
+node <skill>/scripts/cross-agent-sdd.mjs uninstall <repo> [--write] [--force] [--yes]
 node <skill>/scripts/cross-agent-sdd.mjs install-skill --scope user|project --agents all --write
+node <skill>/scripts/cross-agent-sdd.mjs uninstall-skill --scope user|project --agents all [--write] [--yes]
 ```
 
 Defaults: profiles `core,sdd`; agents `claude,codex,cursor`; dry-run for every mutating command.
+
+## Removal
+
+When the user asks to remove the governance: run `uninstall <repo>` (dry run), show the user the list of
+files marked delete and edit, and ask for an explicit yes in the conversation. Only after that yes run
+`uninstall <repo> --write --yes`. The same rule applies to `uninstall-skill`. Then tell the user what the tool
+cannot undo: Git hook lines, CI steps, and package-manager aliases they added for `scripts/check-sdd.mjs`.
 
 ## Red flags under pressure
 
@@ -69,6 +78,8 @@ Defaults: profiles `core,sdd`; agents `claude,codex,cursor`; dry-run for every m
 - Upgrade or re-apply replaces a managed file only when its recorded hash still matches.
 - User-owned conflicts stop application. `--force` never authorizes replacement of an unowned directory.
 - Waivers cover only commits already on a shared branch; `--staged` never reads them.
+- `--yes` on `uninstall` or `uninstall-skill` stands for a confirmation the user gave in this conversation after
+  seeing the dry-run list. Never pass it on your own initiative.
 - Green structural gates do not prove intended behavior. Reconcile contract, evidence, and code manually.
 - Never fabricate SPEC invariants or evidence citations from filenames or static guesses.
 - Keep secrets, live configuration values, credentials, and organization-specific identifiers out of templates.

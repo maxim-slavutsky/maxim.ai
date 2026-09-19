@@ -4,8 +4,10 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  rmdirSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -13,6 +15,7 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
+import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { toMdc } from '../assets/repository/scripts/gen-cursor-rules.mjs';
 
@@ -29,10 +32,14 @@ function assetSource(targetPath) {
 const MANIFEST = '.agent-toolchain.json';
 const CONFIG = '.agent-sdd/config.json';
 const WAIVERS = '.agent-sdd/waivers.json';
+const INSTALL_MARKER = '.cross-agent-sdd-install.json';
 const AGENTS_START = '<!-- cross-agent-sdd:start -->';
 const AGENTS_END = '<!-- cross-agent-sdd:end -->';
+const AGENTS_DEFAULT_HEADER = '# Repository agent instructions';
 const GITIGNORE_START = '# cross-agent-sdd:start';
 const GITIGNORE_END = '# cross-agent-sdd:end';
+const HOOK_SCRIPT = 'scripts/hooks/post-edit-reminder.mjs';
+const CODEX_HOOK_DESCRIPTION = 'Cross-agent counterpart hooks. Canonical policy loads before edits through AGENTS.md and skills.';
 const DEFAULT_PROFILES = ['core', 'sdd'];
 const ALL_PROFILES = ['core', 'sdd', 'config', 'helm'];
 const ALL_AGENTS = ['claude', 'codex', 'cursor'];
@@ -79,29 +86,38 @@ Commands
                                   the plan and writes nothing.
   verify <repo> [--json]          Check that every generated file is intact, then run the repository gate
                                   (scripts/check-sdd.mjs). Changes nothing.
+  uninstall <repo> --write        Remove everything "apply" added: delete tool-owned files, take the managed
+                                  block out of AGENTS.md, the import out of CLAUDE.md, the hook entries out
+                                  of the settings files. Your own files stay. Asks you to type "uninstall"
+                                  before deleting; without --write it only lists what would go.
   install-skill [options] --write Copy this skill into your home folder (or one repository) so your AI tools
                                   can find it. Without --write it only shows the target folders.
+  uninstall-skill [options] --write   Remove those copies again (only folders this installer created).
 
-Options for plan and apply
+Options for plan, apply, and uninstall
   --profiles core,sdd,config,helm   Which file sets to install. "core,sdd" is the default and always included.
                                     "config" adds a runtime-config propagation gate; "helm" adds Helm chart
-                                    validation. "full" means all four.
-  --agents all | claude,codex,cursor   Which AI tools to configure. Default: all three.
+                                    validation. "full" means all four. (plan, apply)
+  --agents all | claude,codex,cursor   Which AI tools to configure. Default: all three. (plan, apply)
   --merge-agents                    When AGENTS.md or CLAUDE.md already exists, append the managed block or the
-                                    @AGENTS.md import instead of stopping. Read those files first.
-  --allow-dirty                     Apply even if the repository has uncommitted changes. Not recommended.
-  --json                            Machine-readable output (plan, audit, verify).
+                                    @AGENTS.md import instead of stopping. Read those files first. (plan, apply)
+  --allow-dirty                     Run even if the repository has uncommitted changes. Not recommended.
+  --yes                             Skip the typed confirmation. Only for scripts, and only after a person has
+                                    confirmed. (uninstall, uninstall-skill)
+  --force                           uninstall: also delete tool-owned files that were edited after install.
+  --json                            Machine-readable output (plan, audit, verify, install-skill).
 
-Options for install-skill
+Options for install-skill and uninstall-skill
   --scope user | project            "user" = your home folder (default), "project" = one repository (--repo).
   --repo <path>                     Repository for --scope project. Default: current folder.
   --agents all | claude,codex,cursor   Which tools get a copy. Codex and Cursor share ~/.agents/skills.
-  --cursor-cloud                    Also copy into ~/.cursor/skills (only for Cursor Cloud sync).
-  --force                           Replace a copy this tool installed earlier (upgrade).
+  --cursor-cloud                    Also use ~/.cursor/skills (only for Cursor Cloud sync).
+  --force                           install-skill: replace a copy this tool installed earlier (upgrade).
 
 Safety
-  Every command that writes files is a dry run until you add --write.
-  A file that already exists and was not created by this tool is reported as a conflict and never overwritten.`);
+  Every command that writes or deletes files is a dry run until you add --write.
+  A file that already exists and was not created by this tool is reported as a conflict and never overwritten.
+  Uninstall never deletes a file this tool did not create, and keeps tool files you edited unless --force.`);
 }
 
 function parseArgs(argv) {
@@ -168,6 +184,14 @@ function repoRoot(input = '.') {
   }
 }
 
+function requireCleanTree(root, parsed, verb) {
+  if (!flag(parsed, 'allow-dirty', false) && git(root, ['status', '--porcelain'])) {
+    throw new Error(
+      `the repository has uncommitted changes. Commit or stash them first so you can review what ${verb} does as one clean diff. To continue anyway, add --allow-dirty.`,
+    );
+  }
+}
+
 /** Tracked plus untracked-but-not-ignored files, repo-relative with forward slashes. */
 function repositoryFiles(root) {
   return git(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
@@ -181,7 +205,7 @@ function safePath(root, path) {
   const absoluteRoot = resolve(root);
   const absolute = resolve(path);
   if (absolute !== absoluteRoot && !absolute.startsWith(`${absoluteRoot}\\`) && !absolute.startsWith(`${absoluteRoot}/`)) {
-    throw new Error(`refusing to write outside the target folder: ${absolute}`);
+    throw new Error(`refusing to touch a path outside the target folder: ${absolute}`);
   }
   return absolute;
 }
@@ -204,6 +228,33 @@ function atomicWrite(path, content) {
     if (existsSync(path)) unlinkSync(path);
     renameSync(backup, path);
     throw error;
+  }
+}
+
+/** Remove now-empty parent folders between `path` and `root`. */
+function pruneEmptyDirs(root, path) {
+  let cursor = dirname(path);
+  const stop = resolve(root);
+  while (cursor !== stop && cursor.startsWith(stop)) {
+    if (!existsSync(cursor) || readdirSync(cursor).length) return;
+    rmdirSync(cursor);
+    cursor = dirname(cursor);
+  }
+}
+
+async function confirmOrThrow(parsed, word, what) {
+  if (flag(parsed, 'yes', false)) return true;
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      `confirmation required: ${what}. Run this command in an interactive terminal and type "${word}" when asked, or add --yes only when a person has already confirmed the list above.`,
+    );
+  }
+  const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await prompt.question(`Type "${word}" to confirm, anything else to cancel: `);
+    return answer.trim() === word;
+  } finally {
+    prompt.close();
   }
 }
 
@@ -282,13 +333,17 @@ function readManifest(root) {
   }
 }
 
+function hookMatches(command) {
+  return String(command ?? '').replaceAll('\\', '/').includes(HOOK_SCRIPT);
+}
+
 function mergeHookConfig(agent, current = {}) {
   const data = structuredClone(current);
   if (agent === 'cursor') {
     data.version ??= 1;
     data.hooks ??= {};
     data.hooks.postToolUse ??= [];
-    const command = 'node scripts/hooks/post-edit-reminder.mjs --cursor';
+    const command = `node ${HOOK_SCRIPT} --cursor`;
     if (!data.hooks.postToolUse.some((item) => item?.command === command)) {
       data.hooks.postToolUse.push({ command, timeout: 5 });
     }
@@ -296,18 +351,15 @@ function mergeHookConfig(agent, current = {}) {
   }
   data.hooks ??= {};
   data.hooks.PostToolUse ??= [];
-  const script = 'scripts/hooks/post-edit-reminder.mjs';
-  const already = data.hooks.PostToolUse.some((entry) =>
-    (entry?.hooks ?? []).some((hook) => String(hook?.command ?? '').replaceAll('\\', '/').includes(script)),
-  );
+  const already = data.hooks.PostToolUse.some((entry) => (entry?.hooks ?? []).some((hook) => hookMatches(hook?.command)));
   if (already) return data;
   if (agent === 'claude') {
     data.hooks.PostToolUse.push({
       matcher: 'Edit|Write',
-      hooks: [{ type: 'command', command: `node ${script}`, timeout: 5 }],
+      hooks: [{ type: 'command', command: `node ${HOOK_SCRIPT}`, timeout: 5 }],
     });
   } else {
-    data.description ??= 'Cross-agent counterpart hooks. Canonical policy loads before edits through AGENTS.md and skills.';
+    data.description ??= CODEX_HOOK_DESCRIPTION;
     data.hooks.PostToolUse.push({
       matcher: '^apply_patch$',
       hooks: [
@@ -323,6 +375,26 @@ function mergeHookConfig(agent, current = {}) {
     });
   }
   return data;
+}
+
+/** Inverse of mergeHookConfig: drop our entry, then any container it left empty. */
+function stripHookConfig(agent, current) {
+  const data = structuredClone(current ?? {});
+  if (agent === 'cursor') {
+    if (Array.isArray(data.hooks?.postToolUse)) {
+      data.hooks.postToolUse = data.hooks.postToolUse.filter((item) => !hookMatches(item?.command));
+      if (!data.hooks.postToolUse.length) delete data.hooks.postToolUse;
+    }
+  } else {
+    if (Array.isArray(data.hooks?.PostToolUse)) {
+      data.hooks.PostToolUse = data.hooks.PostToolUse.filter((entry) => !(entry?.hooks ?? []).some((hook) => hookMatches(hook?.command)));
+      if (!data.hooks.PostToolUse.length) delete data.hooks.PostToolUse;
+    }
+    if (data.description === CODEX_HOOK_DESCRIPTION) delete data.description;
+  }
+  if (data.hooks && typeof data.hooks === 'object' && !Object.keys(data.hooks).length) delete data.hooks;
+  const meaningful = Object.keys(data).filter((key) => !(agent === 'cursor' && key === 'version'));
+  return { data, empty: !meaningful.length };
 }
 
 const hookConfigs = {
@@ -347,7 +419,7 @@ function hookContent(root, agent) {
 function agentsContent(root, allowMerge) {
   const fragment = read(join(ASSET_ROOT, 'AGENTS.fragment.md')).trim();
   const path = join(root, 'AGENTS.md');
-  if (!existsSync(path)) return { action: 'create', content: `# Repository agent instructions\n\n${fragment}\n` };
+  if (!existsSync(path)) return { action: 'create', content: `${AGENTS_DEFAULT_HEADER}\n\n${fragment}\n` };
   const current = read(path);
   const replaced = replaceBlock(current, fragment, AGENTS_START, AGENTS_END);
   if (replaced !== null) return { action: replaced === current ? 'preserve' : 'update', content: replaced };
@@ -440,9 +512,11 @@ function plan(root, profiles, agents, allowMerge = false) {
   for (const agent of agents) {
     const path = hookConfigs[agent];
     const content = hookContent(root, agent);
-    actions.push({ path, action: existsSync(join(root, path)) && read(join(root, path)) === content ? 'preserve' : 'merge', content });
+    const absolute = join(root, path);
+    const action = !existsSync(absolute) ? 'create' : read(absolute) === content ? 'preserve' : 'merge';
+    actions.push({ path, action, content });
   }
-  return { root, profiles, agents, actions };
+  return { root, profiles, agents, actions, previousManifest: manifest };
 }
 
 function audit(root) {
@@ -504,7 +578,8 @@ function printAudit(result) {
 
 function printPlan(value, asJson) {
   if (asJson) {
-    console.log(JSON.stringify({ ...value, actions: value.actions.map(({ content: _content, ...action }) => action) }, null, 2));
+    const { previousManifest: _previous, ...rest } = value;
+    console.log(JSON.stringify({ ...rest, actions: value.actions.map(({ content: _content, ...action }) => action) }, null, 2));
     return;
   }
   console.log(`Repository: ${value.root}`);
@@ -528,6 +603,14 @@ function printPlan(value, asJson) {
   for (const action of conflicts) console.log(`  - ${action.path}: ${action.reason}`);
 }
 
+/** How a merged/managed file came to carry our content; uninstall uses it to decide edit vs delete. */
+function installMode(action, previousRecord) {
+  if (previousRecord?.mode) return previousRecord.mode;
+  if (action === 'create') return 'created';
+  if (action === 'preserve') return 'preserved';
+  return 'appended';
+}
+
 function applyPlan(value) {
   const conflicts = value.actions.filter((action) => action.action === 'conflict');
   if (conflicts.length) {
@@ -549,13 +632,14 @@ function applyPlan(value) {
       if (action.path === CONFIG || action.path === WAIVERS) continue;
       const path = join(value.root, action.path);
       if (!existsSync(path)) continue;
+      const previous = value.previousManifest?.managedFiles?.[action.path];
       if (action.path === 'AGENTS.md') {
         const block = managedBlock(read(path), AGENTS_START, AGENTS_END);
-        managedFiles[action.path] = { kind: 'managed-block', sha256: sha(block ?? '') };
+        managedFiles[action.path] = { kind: 'managed-block', mode: installMode(action.action, previous), sha256: sha(block ?? '') };
       } else if (action.path === '.gitignore' || action.path === 'CLAUDE.md') {
-        managedFiles[action.path] = { kind: 'merged' };
+        managedFiles[action.path] = { kind: 'merged', mode: installMode(action.action, previous) };
       } else if (Object.values(hookConfigs).includes(action.path)) {
-        managedFiles[action.path] = { kind: 'semantic' };
+        managedFiles[action.path] = { kind: 'semantic', mode: installMode(action.action, previous) };
       } else {
         managedFiles[action.path] = { kind: 'generated', sha256: sha(read(path)) };
       }
@@ -576,6 +660,143 @@ function applyPlan(value) {
       try {
         if (item.before === null && existsSync(item.path)) unlinkSync(item.path);
         else if (item.before !== null) atomicWrite(item.path, item.before);
+      } catch {
+        // Preserve original error; report manual recovery if rollback itself is incomplete.
+      }
+    }
+    throw error;
+  }
+}
+
+function withoutLine(body, line) {
+  return body.split('\n').filter((item) => item.trim() !== line).join('\n');
+}
+
+function trimmedOrEmpty(body) {
+  const trimmed = body.replace(/\n{3,}/g, '\n\n').trim();
+  return trimmed ? `${trimmed}\n` : '';
+}
+
+/** What uninstall would do. Actions: delete, edit (content), keep (reason), skip (reason). */
+function uninstallPlan(root, force) {
+  const manifest = readManifest(root);
+  if (!manifest) {
+    throw new Error(`${MANIFEST} is missing, so there is nothing to uninstall. This repository was never set up by cross-agent-sdd, or the file was deleted; if files remain, remove them by hand.`);
+  }
+  const actions = [];
+  const push = (path, action, extra = {}) => actions.push({ path, action, ...extra });
+
+  for (const [path, record] of Object.entries(manifest.managedFiles ?? {})) {
+    const absolute = join(root, path);
+    if (!existsSync(absolute)) {
+      push(path, 'skip', { reason: 'already gone' });
+      continue;
+    }
+    const current = read(absolute);
+    const mode = record.mode ?? 'appended';
+
+    if (record.kind === 'generated') {
+      const unchanged = sha(current) === record.sha256;
+      if (unchanged) push(path, 'delete');
+      else if (force) push(path, 'delete', { reason: 'edited after install; deleted because --force was given' });
+      else push(path, 'keep', { reason: 'edited after install; add --force to delete it anyway' });
+      continue;
+    }
+    if (mode === 'preserved') {
+      push(path, 'keep', { reason: 'existed with this content before install; not ours to change' });
+      continue;
+    }
+    if (record.kind === 'managed-block') {
+      const block = managedBlock(current, AGENTS_START, AGENTS_END);
+      if (!block) {
+        push(path, 'keep', { reason: 'the cross-agent-sdd block is no longer there; nothing to remove' });
+        continue;
+      }
+      const rest = trimmedOrEmpty(current.replace(block, ''));
+      if (mode === 'created' && (!rest || rest.trim() === AGENTS_DEFAULT_HEADER)) push(path, 'delete', { reason: 'created by install, only the managed block inside' });
+      else push(path, 'edit', { content: rest, reason: 'remove the cross-agent-sdd block, keep the rest' });
+      continue;
+    }
+    if (path === 'CLAUDE.md') {
+      const rest = trimmedOrEmpty(withoutLine(current, '@AGENTS.md'));
+      if (mode === 'created' && !rest) push(path, 'delete', { reason: 'created by install, only the @AGENTS.md import inside' });
+      else if (rest === trimmedOrEmpty(current)) push(path, 'keep', { reason: 'the @AGENTS.md line is no longer there; nothing to remove' });
+      else push(path, 'edit', { content: rest, reason: 'remove the @AGENTS.md import, keep the rest' });
+      continue;
+    }
+    if (path === '.gitignore') {
+      const block = managedBlock(current, GITIGNORE_START, GITIGNORE_END);
+      if (!block) {
+        push(path, 'keep', { reason: 'the cross-agent-sdd block is no longer there; nothing to remove' });
+        continue;
+      }
+      const rest = trimmedOrEmpty(current.replace(block, ''));
+      if (mode === 'created' && !rest) push(path, 'delete', { reason: 'created by install, only the changes-log.md rule inside' });
+      else push(path, 'edit', { content: rest, reason: 'remove the changes-log.md rule, keep the rest' });
+      continue;
+    }
+    const agent = Object.entries(hookConfigs).find(([, hookPath]) => hookPath === path)?.[0];
+    if (agent) {
+      let parsedJson;
+      try {
+        parsedJson = readJson(absolute);
+      } catch (error) {
+        push(path, 'keep', { reason: `not valid JSON (${error.message}); remove the ${HOOK_SCRIPT} entry by hand` });
+        continue;
+      }
+      const { data, empty } = stripHookConfig(agent, parsedJson);
+      const content = `${JSON.stringify(data, null, 2)}\n`;
+      if (mode === 'created' && empty) push(path, 'delete', { reason: 'created by install, only the reminder hook inside' });
+      else if (content === current) push(path, 'keep', { reason: 'the reminder hook entry is no longer there; nothing to remove' });
+      else push(path, 'edit', { content, reason: 'remove the reminder hook entry, keep your other settings' });
+      continue;
+    }
+    push(path, 'keep', { reason: `unknown record kind "${record.kind}"; remove by hand if it is ours` });
+  }
+
+  for (const path of [CONFIG, WAIVERS]) {
+    if (existsSync(join(root, path))) push(path, 'delete', { reason: 'gate configuration; useless without the gate, Git history keeps it' });
+  }
+  push(MANIFEST, 'delete', { reason: 'ownership record' });
+  return { root, actions, manifest };
+}
+
+function printUninstall(value) {
+  console.log(`Repository: ${value.root}`);
+  console.log(`Installed by: ${value.manifest.generator?.name ?? SKILL_NAME} ${value.manifest.generator?.version ?? '?'}\n`);
+  for (const action of value.actions) {
+    console.log(`  ${action.action.padEnd(8)} ${action.path}${action.reason ? `   (${action.reason})` : ''}`);
+  }
+  const counts = {};
+  for (const action of value.actions) counts[action.action] = (counts[action.action] ?? 0) + 1;
+  console.log(
+    `\nAction words: delete = file removed; edit = only the cross-agent-sdd part removed, your text stays; ` +
+      'keep = left untouched for the reason shown; skip = already absent.',
+  );
+  console.log(`Summary: ${Object.entries(counts).map(([name, count]) => `${count} ${name}`).join(', ')}.`);
+  if (existsSync(join(value.root, 'changes-log.md'))) {
+    console.log('Note: changes-log.md stays; it is your session log, delete it yourself when done.');
+  }
+}
+
+function applyUninstall(value) {
+  const rollback = [];
+  try {
+    for (const action of value.actions) {
+      if (action.action !== 'delete' && action.action !== 'edit') continue;
+      const path = safePath(value.root, join(value.root, action.path));
+      const before = read(path);
+      if (action.action === 'edit') atomicWrite(path, action.content);
+      else unlinkSync(path);
+      rollback.push({ path, before });
+    }
+    for (const action of value.actions) {
+      if (action.action === 'delete') pruneEmptyDirs(value.root, join(value.root, action.path));
+    }
+  } catch (error) {
+    for (const item of rollback.reverse()) {
+      try {
+        atomicWrite(item.path, item.before);
       } catch {
         // Preserve original error; report manual recovery if rollback itself is incomplete.
       }
@@ -610,8 +831,8 @@ function verify(root) {
     const path = hookConfigs[agent];
     if (!path || !existsSync(join(root, path))) {
       errors.push(`missing ${agent} hook config (${path ?? agent}). Run "apply <repo> --write" to recreate it.`);
-    } else if (!read(join(root, path)).replaceAll('\\', '/').includes('scripts/hooks/post-edit-reminder.mjs')) {
-      errors.push(`${agent} hook config (${path}) no longer runs scripts/hooks/post-edit-reminder.mjs. Add the hook entry back or run "apply <repo> --write".`);
+    } else if (!read(join(root, path)).replaceAll('\\', '/').includes(HOOK_SCRIPT)) {
+      errors.push(`${agent} hook config (${path}) no longer runs ${HOOK_SCRIPT}. Add the hook entry back or run "apply <repo> --write".`);
     }
   }
 
@@ -632,7 +853,7 @@ function copySkill(target, force) {
   mkdirSync(parent, { recursive: true });
   safePath(parent, target);
   if (existsSync(target)) {
-    const marker = join(target, '.cross-agent-sdd-install.json');
+    const marker = join(target, INSTALL_MARKER);
     if (!existsSync(marker)) {
       throw new Error(`refusing to replace ${target}: that folder was not created by this installer. Move it aside first if you want this skill there.`);
     }
@@ -643,7 +864,7 @@ function copySkill(target, force) {
   const backup = join(parent, `.${SKILL_NAME}-${process.pid}-${randomUUID()}.bak`);
   cpSync(SKILL_ROOT, temporary, { recursive: true, errorOnExist: true, force: false });
   writeFileSync(
-    join(temporary, '.cross-agent-sdd-install.json'),
+    join(temporary, INSTALL_MARKER),
     `${JSON.stringify({ name: SKILL_NAME, version: VERSION }, null, 2)}\n`,
     'utf8',
   );
@@ -663,7 +884,7 @@ function copySkill(target, force) {
   }
 }
 
-function installSkill(parsed) {
+function skillTargets(parsed) {
   const scope = flag(parsed, 'scope', 'user');
   if (!['user', 'project'].includes(scope)) {
     throw new Error('--scope must be "user" (your home folder, available in every repository) or "project" (one repository, use --repo <path>).');
@@ -678,6 +899,11 @@ function installSkill(parsed) {
   if (agents.includes('cursor') && flag(parsed, 'cursor-cloud', false)) {
     targets.push({ path: join(base, '.cursor', 'skills', SKILL_NAME), tools: 'Cursor Cloud sync' });
   }
+  return { scope, agents, targets };
+}
+
+function installSkill(parsed) {
+  const { scope, agents, targets } = skillTargets(parsed);
   const output = { scope, agents, targets: targets.map((target) => target.path) };
   if (!flag(parsed, 'write', false)) return { ...output, dryRun: true, details: targets };
   for (const target of targets) copySkill(target.path, flag(parsed, 'force', false));
@@ -698,7 +924,24 @@ function printInstall(result) {
   }
 }
 
-function main() {
+function uninstallSkillPlan(parsed) {
+  const { scope, targets } = skillTargets(parsed);
+  const actions = targets.map((target) => {
+    if (!existsSync(target.path)) return { ...target, action: 'skip', reason: 'not installed there' };
+    if (!existsSync(join(target.path, INSTALL_MARKER))) return { ...target, action: 'keep', reason: 'folder was not created by this installer; remove it by hand if it is yours' };
+    return { ...target, action: 'delete' };
+  });
+  return { scope, actions };
+}
+
+function printUninstallSkill(value) {
+  console.log(`uninstall-skill (scope: ${value.scope}):`);
+  for (const action of value.actions) {
+    console.log(`  ${action.action.padEnd(8)} ${action.path}   (${action.tools}${action.reason ? `; ${action.reason}` : ''})`);
+  }
+}
+
+async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   const command = parsed.positional.shift();
   if (!command || ['help', '-h', '--help'].includes(command)) {
@@ -719,12 +962,53 @@ function main() {
     }
     return;
   }
+  if (command === 'uninstall-skill') {
+    const value = uninstallSkillPlan(parsed);
+    printUninstallSkill(value);
+    const deletions = value.actions.filter((action) => action.action === 'delete');
+    if (!flag(parsed, 'write', false)) {
+      console.log('\nThis was a dry run: nothing was changed. Add --write to remove the folders marked "delete".');
+      return;
+    }
+    if (!deletions.length) {
+      console.log('\nNothing to remove.');
+      return;
+    }
+    if (!(await confirmOrThrow(parsed, 'uninstall', `this deletes ${deletions.length} skill folder(s) listed above`))) {
+      console.log('Cancelled. Nothing was changed.');
+      return;
+    }
+    for (const action of deletions) rmSync(action.path, { recursive: true });
+    console.log(`\nRemoved ${deletions.length} skill folder(s). Repositories set up with the skill keep working; use "uninstall <repo>" to undo those.`);
+    return;
+  }
 
   const root = repoRoot(parsed.positional[0] ?? '.');
   if (command === 'audit') {
     const result = audit(root);
     if (flag(parsed, 'json', false)) console.log(JSON.stringify(result, null, 2));
     else printAudit(result);
+    return;
+  }
+  if (command === 'uninstall') {
+    const value = uninstallPlan(root, flag(parsed, 'force', false));
+    printUninstall(value);
+    if (!flag(parsed, 'write', false)) {
+      console.log('\nThis was a dry run: nothing was changed. Re-run with --write to remove the files marked "delete" and clean the ones marked "edit".');
+      return;
+    }
+    requireCleanTree(root, parsed, 'uninstall');
+    const changes = value.actions.filter((action) => action.action === 'delete' || action.action === 'edit').length;
+    if (!(await confirmOrThrow(parsed, 'uninstall', `this deletes or edits ${changes} file(s) listed above`))) {
+      console.log('Cancelled. Nothing was changed.');
+      return;
+    }
+    applyUninstall(value);
+    console.log(`\nUninstalled cross-agent-sdd from ${root}. Review the diff with "git status" and commit it.
+Things this tool cannot undo for you:
+  - lines you added to Git hooks (pre-commit, commit-msg) or CI that run scripts/check-sdd.mjs: remove them;
+  - package.json script aliases you added for the gate;
+  - your own SPEC.md files: they stay and remain useful without the gate.`);
     return;
   }
 
@@ -736,11 +1020,7 @@ function main() {
     return;
   }
   if (command === 'apply') {
-    if (!flag(parsed, 'allow-dirty', false) && git(root, ['status', '--porcelain'])) {
-      throw new Error(
-        'the repository has uncommitted changes. Commit or stash them first so you can review what this tool writes as one clean diff. To apply anyway, add --allow-dirty.',
-      );
-    }
+    requireCleanTree(root, parsed, 'apply');
     printPlan(value, false);
     if (!flag(parsed, 'write', false)) {
       console.log('\nThis was a dry run: nothing was written. Re-run the same command with --write to create the files.');
@@ -755,7 +1035,8 @@ function main() {
        commit-msg:  node scripts/check-sdd.mjs --staged --commit-msg $1
        CI:          node scripts/check-sdd.mjs --changed
   4. Run "verify <repo>" to confirm every generated file is intact and the gate is green.
-  5. Commit the new files together (this tool never commits for you).`);
+  5. Commit the new files together (this tool never commits for you).
+To remove everything later: "uninstall <repo> --write".`);
     return;
   }
   if (command === 'verify') {
@@ -778,7 +1059,7 @@ function main() {
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   console.error(`cross-agent-sdd: ${error.message}`);
   process.exit(1);

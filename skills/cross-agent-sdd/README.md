@@ -190,6 +190,34 @@ Every message ends with what to do. The most frequent ones:
 
 ## Uninstall
 
-Delete the files listed in `.agent-toolchain.json`, the marked block in `AGENTS.md`, the `@AGENTS.md` line
-in `CLAUDE.md`, the hook entries in the three settings files, and the `changes-log.md` line in `.gitignore`.
-Then delete `.agent-toolchain.json` and `.agent-sdd/`. Your own `SPEC.md` files stay useful without the gate.
+From a repository:
+
+```bash
+node $SKILL uninstall .            # dry run: lists what would be deleted, edited, kept
+node $SKILL uninstall . --write    # asks you to type "uninstall", then removes it
+```
+
+What happens:
+
+| Kind of file | What uninstall does |
+|---|---|
+| Files the tool created (workflows, adapters, gate, hooks script, generated Cursor rules) | Deleted, if unchanged since install. Edited copies are kept and reported; add `--force` to delete them too. |
+| `AGENTS.md`, `CLAUDE.md`, `.gitignore` | Only the cross-agent-sdd block or line is removed; your text stays. A file the tool created and that holds nothing else is deleted. |
+| `.claude/settings.json`, `.codex/hooks.json`, `.cursor/hooks.json` | Only the reminder hook entry is removed; your other hooks and settings stay. A file the tool created and that holds nothing else is deleted. |
+| `.agent-sdd/config.json`, `.agent-sdd/waivers.json`, `.agent-toolchain.json` | Deleted (Git history keeps them). |
+| Your `SPEC.md` files, `changes-log.md` | Untouched. |
+| Empty folders left behind | Removed. |
+
+Options: `--write` perform; `--yes` skip the typed confirmation (for scripts, only after a person confirmed);
+`--force` also delete edited tool files; `--allow-dirty` run with uncommitted changes present.
+
+Not undone automatically: lines you added to Git hooks, CI, or `package.json` that run `scripts/check-sdd.mjs`.
+The command reminds you at the end.
+
+To remove the skill copies from your machine:
+
+```bash
+node skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs uninstall-skill --scope user --agents all --write
+```
+
+Only folders this installer created are removed; anything else under those paths is left alone.
