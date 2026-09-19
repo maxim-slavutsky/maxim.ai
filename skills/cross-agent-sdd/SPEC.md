@@ -24,7 +24,8 @@ contracts w/o rejecting their documented valid formats.
 V1: Tasks & Bugs ledgers read from heading → next level-two heading | absolute EOF; blank lines & table
 header/separator rows before `T<n>|...` | `B<n>|...` data valid.
 V2: ∀ `.claude/rules/<n>.md` (≠ `INDEX.md`) → `.cursor/rules/<n>.mdc` = `scripts/gen-cursor-rules.mjs` output.
-Stale | missing | stray `.mdc` → gate fail. ⊥ hand-edit `.mdc`.
+Stale | missing | stray `.mdc` → gate fail. ⊥ hand-edit `.mdc`. `INDEX.md` excluded everywhere: generator, adapter
+link check **& the per-commit partner check** — it is the human index, ⊥ a rule ∴ ⊥ mirror, ⊥ `Agent-Parity` trailer.
 V3: `--changed` base = first of `--base`, `SDD_BASE_REF`, `origin/<CHANGE_TARGET>` | `<CHANGE_TARGET>`,
 `GIT_PREVIOUS_COMMIT`, `GIT_PREVIOUS_SUCCESSFUL_COMMIT`, `HEAD^`. Explicit source (`--base`, `SDD_BASE_REF`,
 `CHANGE_TARGET`) unresolvable → fail; ⊥ silent fallback to `HEAD^`.
@@ -65,3 +66,4 @@ B7|2026-09-19|project-scope skill install: bundled `assets/` docs, own SPEC, own
 B8|2026-09-19|hook config partner group included changed file ∴ matcher-only change passed staged gate|V8
 B9|2026-09-19|re-apply w/ fewer profiles rebuilt manifest from plan only ∴ optional-profile files lost ownership, uninstall missed them|V7
 B10|2026-09-19|edited generated file = `conflict` ∴ whole apply blocked; message & README promised skip|V7 `keep`
+B11|2026-09-20|`partnerGroups` paired `.claude/rules/INDEX.md` w/ `.cursor/rules/INDEX.mdc` ∴ every commit touching the index needed an `Agent-Parity` trailer (generator + adapter check already skipped it)|V2 partner check skips `INDEX`

@@ -697,6 +697,28 @@ test('a hook config change needs every other enabled hook config, never itself [
   assert.equal(checked.status, 0, `the hook script alone needs no partner: ${checked.stderr}`);
 });
 
+test('.claude/rules/INDEX.md is not a rule: no .cursor mirror, no Agent-Parity trailer [@spec cross-agent-sdd.gates:V2]', () => {
+  const root = installed();
+  const message = join(root, 'msg.txt');
+  writeFileSync(message, 'docs: index the rules\n', 'utf8');
+  const index = '.claude/rules/INDEX.md';
+  writeFileSync(join(root, index), '# Rules\n\n- [spec-first](spec-first.md)\n', 'utf8');
+  git(root, ['add', index]);
+
+  let checked = gate(root);
+  assert.equal(checked.status, 0, `static gate must not expect .cursor/rules/INDEX.mdc: ${checked.stderr}`);
+  checked = gate(root, ['--staged', '--commit-msg', message]);
+  assert.equal(checked.status, 0, `the index alone is not a one-sided harness edit: ${checked.stderr}`);
+
+  // A real rule still needs its mirror in the same commit.
+  const rule = '.claude/rules/spec-first.md';
+  writeFileSync(join(root, rule), `${readFileSync(join(root, rule), 'utf8')}\n<!-- touched -->\n`, 'utf8');
+  git(root, ['add', rule]);
+  checked = gate(root, ['--staged', '--commit-msg', message]);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /harness paths lack partner change: \.claude\/rules\/spec-first\.md/);
+});
+
 test('docs tell CI to run the per-commit gate, not only the static one', () => {
   const ciMentionsChanged = /\bCI\b[^\n]*--changed|--changed[^\n]*\bCI\b/;
   assert.match(readFileSync(join(SKILL_ROOT, 'references', 'configuration.md'), 'utf8'), ciMentionsChanged);

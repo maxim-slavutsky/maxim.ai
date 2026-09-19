@@ -19,7 +19,7 @@ import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { toMdc } from '../assets/repository/scripts/gen-cursor-rules.mjs';
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 const SKILL_NAME = 'cross-agent-sdd';
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSET_ROOT = join(SKILL_ROOT, 'assets', 'repository');
