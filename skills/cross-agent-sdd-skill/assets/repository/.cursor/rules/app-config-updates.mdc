@@ -1,0 +1,13 @@
+---
+description: Propagate runtime config shape changes through every maintained surface.
+globs:
+  - "**/config/**"
+  - "**/configs/**"
+  - "**/chart/**"
+  - "**/values*.yaml"
+  - "**/values*.yml"
+alwaysApply: false
+---
+
+Read [canonical application config workflow](../../docs/workflows/APP-CONFIG-WORKFLOW.md) before editing. This file
+owns Cursor path matching only; do not duplicate shared policy here.

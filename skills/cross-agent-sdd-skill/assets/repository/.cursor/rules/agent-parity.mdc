@@ -1,0 +1,14 @@
+---
+description: Keep enabled coding-agent harness configuration synchronized.
+globs:
+  - ".claude/**"
+  - ".codex/**"
+  - ".cursor/**"
+  - ".agents/**"
+  - "scripts/hooks/**"
+  - "docs/workflows/**"
+alwaysApply: false
+---
+
+Read [canonical agent parity workflow](../../docs/workflows/AGENT-PARITY-WORKFLOW.md) completely before editing.
+This file owns Cursor path matching only; do not duplicate or override shared policy here.
