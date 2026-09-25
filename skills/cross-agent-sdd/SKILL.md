@@ -24,13 +24,17 @@ hook, and CI integration.
    to make application succeed without inspecting the target.
 6. Complete target-specific work the generator cannot infer safely:
    - merge the managed `AGENTS.md` block when required;
-   - map actual runtime/config ownership in `.agent-sdd/config.json`;
-   - wire the gate: `node scripts/check-sdd.mjs` in pre-commit, `--staged --commit-msg` in commit-msg, and in
-     CI both the static command and `--changed` (static alone never inspects a commit);
+   - map actual runtime/config ownership in `.agent-sdd/config.json`: `runtimeRoots`, `moduleRoots` (folders whose
+     children are modules that need a `SPEC.md`), `exclude`;
+   - wire both gates: `node scripts/check-docs.mjs && node scripts/check-sdd.mjs` in pre-commit,
+     `--staged --commit-msg` in commit-msg, and in CI both static commands and `--changed` (static alone never
+     inspects a commit). Call `node` directly, not through a package-manager wrapper;
    - regenerate `.cursor/rules/*.mdc` with `node scripts/gen-cursor-rules.mjs` after any `.claude/rules` edit;
-   - add or reconcile real module `SPEC.md` files without inventing behavior;
+   - add or reconcile real module `SPEC.md` files without inventing behavior; fill the coverage and call-out
+     tables in `docs/workflows/SPEC-FIRST-WORKFLOW.md`, the workspace filter table in
+     `docs/workflows/COMMIT-WORKFLOW.md`, and the rule index rows for repository-specific rules;
    - update package-manager aliases only when useful.
-7. Run `verify`, the generated gate, and repository-native tests. Report remaining manual migration debt.
+7. Run `verify` (runs both gates), and repository-native tests. Report remaining manual migration debt.
    Commits already on a shared branch that fail a per-change gate go into `.agent-sdd/waivers.json` with a
    full SHA and a concrete reason; new work never gets a waiver.
 8. Do not commit, push, open a PR, merge, or delete a worktree unless the user requested that action.
@@ -76,7 +80,12 @@ cannot undo: Git hook lines, CI steps, and package-manager aliases they added fo
 - `.cursor/rules/*.mdc` are generated from `.claude/rules/*.md`; edit the source and regenerate.
 - Agent hooks remind after edits; Git hooks and CI enforce before integration.
 - Generated files carry ownership metadata in `.agent-toolchain.json`.
-- Upgrade or re-apply replaces a managed file only when its recorded hash still matches.
+- Upgrade or re-apply replaces a managed file only when its recorded hash still matches. Text edited inside the
+  `AGENTS.md` markers is kept, never overwritten; `--replace AGENTS.md` takes the new block on request.
+- `.claude/rules/INDEX.md` is generated from the shipped rules at apply and then belongs to the repository. It is
+  not a rule: no mirror, no `.agents` twin, no parity partner.
+- Both gates skip `.claude/worktrees` (Claude Code worktrees are full repository copies inside the checkout).
+- Trailer reasons may fold over continuation lines that start with a space; the gate joins them.
 - User-owned conflicts stop application. `--force` never authorizes replacement of an unowned directory.
 - Waivers cover only commits already on a shared branch; `--staged` never reads them.
 - `--yes` on `uninstall` or `uninstall-skill` stands for a confirmation the user gave in this conversation after

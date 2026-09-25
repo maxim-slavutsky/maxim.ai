@@ -10,6 +10,7 @@ Read when audit reports existing instructions, specs, hooks, gates, or conflicti
 | Generated + unchanged | Safe to upgrade |
 | Generated + locally modified | Kept as is (`keep`); upgrade skips it. To take the tool version: `apply --write --replace <path>` |
 | Pre-existing, identical to template at first apply (`mode: preserved`) | Repository-owned. Never upgraded, never policed by `verify`, never deleted by `uninstall`. Adopt with `apply --write --replace <path>` |
+| Managed `AGENTS.md` block edited inside the markers | Kept as is (`keep`); the upgrade never drops text inside the markers. Move repository text outside the markers, then `apply --write --replace AGENTS.md` |
 | User-owned compatible | Preserve; add link or managed block only after review |
 | User-owned conflicting | Stop and choose canonical owner explicitly |
 

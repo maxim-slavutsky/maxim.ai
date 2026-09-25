@@ -7,8 +7,10 @@ Read before creating or editing agent-specific files.
 | Standing repository policy | root/nested `AGENTS.md` | `CLAUDE.md` imports root policy | native | native |
 | Invocable workflow | `docs/workflows/*.md` | thin `.claude/skills` adapter | thin `.agents/skills` adapter + `agents/openai.yaml` | loads `.agents/skills` |
 | Path-scoped rule | `docs/workflows/*.md` | `.claude/rules/*.md` (tool-neutral body, source) | `AGENTS.md` + `.agents/skills` adapter description | generated `.cursor/rules/*.mdc` |
+| Ordering guard (no path) | `docs/workflows/COMMIT-WORKFLOW.md` section | `.claude/rules/<name>.md` without `paths` | reads the workflow section | generated `.cursor/rules/<name>.mdc` |
+| Rule index | generated `.claude/rules/INDEX.md` | native | none | none |
 | Post-edit reminder | `scripts/hooks/post-edit-reminder.mjs` | `.claude/settings.json` | `.codex/hooks.json` | `.cursor/hooks.json` (`--cursor`) |
-| Enforcement | `scripts/check-sdd.mjs` | Git hooks + CI | Git hooks + CI | Git hooks + CI |
+| Enforcement | `scripts/check-docs.mjs` + `scripts/check-sdd.mjs` | Git hooks + CI | Git hooks + CI | Git hooks + CI |
 
 ## Partner rules
 
@@ -22,8 +24,10 @@ Read before creating or editing agent-specific files.
 - One hook script; all enabled harness configs invoke it. Only the Cursor command passes `--cursor`. The
   three configs move together (a changed config is never its own partner); the script may change alone.
 - The gate skips `.claude/skills/cross-agent-sdd`, `.agents/skills/cross-agent-sdd`, and
-  `.cursor/skills/cross-agent-sdd` (this skill installed in-repo). Other tool skills installed in-repo go into
-  `exclude` in `.agent-sdd/config.json`.
+  `.cursor/skills/cross-agent-sdd` (this skill installed in-repo), and `.claude/worktrees` (Claude Code worktrees,
+  full repository copies). Other tool skills installed in-repo go into `exclude` in `.agent-sdd/config.json`.
+- `.claude/rules/INDEX.md` is the human index of the rules, not a rule: no mirror, no `.agents` twin, no partner.
+  Adding, removing, or renaming a rule updates the index in the same change.
 - Every adapter links exactly one canonical workflow; canonical workflow lists its adapters (gate checks both
   directions). A back-link to `.claude/rules/<name>.md` also covers its generated `.cursor/rules/<name>.mdc`.
 - `agents/openai.yaml` is Codex/OpenAI display metadata, not canonical policy.
