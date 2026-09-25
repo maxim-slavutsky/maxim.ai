@@ -9,6 +9,7 @@ import {
   renameSync,
   rmdirSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -17,9 +18,9 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
-import { toMdc } from '../assets/repository/scripts/gen-cursor-rules.mjs';
+import { parseRule, toMdc } from '../assets/repository/scripts/gen-cursor-rules.mjs';
 
-const VERSION = '0.3.1';
+const VERSION = '0.4.0';
 const SKILL_NAME = 'cross-agent-sdd';
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSET_ROOT = join(SKILL_ROOT, 'assets', 'repository');
@@ -51,6 +52,7 @@ const entries = [
   ['core', 'docs/workflows/AGENT-PARITY-WORKFLOW.md'],
   ['core', 'docs/workflows/COMMIT-WORKFLOW.md'],
   ['core', 'scripts/check-sdd.mjs'],
+  ['core', 'scripts/check-docs.mjs'],
   ['core', 'scripts/gen-cursor-rules.mjs'],
   ['core', 'scripts/hooks/post-edit-reminder.mjs'],
   ['core', '.agents/skills/agent-parity/SKILL.md'],
@@ -59,6 +61,7 @@ const entries = [
   ['core', '.agents/skills/commit-changes/agents/openai.yaml'],
   ['core', '.claude/skills/commit-changes/SKILL.md'],
   ['core', '.claude/rules/agent-parity.md'],
+  ['core', '.claude/rules/finishing-branch-commit-order.md'],
   ['sdd', 'docs/workflows/SPEC-FIRST-WORKFLOW.md'],
   ['sdd', '.agents/skills/spec-first/SKILL.md'],
   ['sdd', '.agents/skills/spec-first/agents/openai.yaml'],
@@ -84,8 +87,8 @@ Commands
   plan <repo> [options]           Show every file "apply" would create, update, keep, or refuse. Changes nothing.
   apply <repo> --write [options]  Write the files from the plan. Without --write it is a dry run: it prints
                                   the plan and writes nothing.
-  verify <repo> [--json]          Check that every generated file is intact, then run the repository gate
-                                  (scripts/check-sdd.mjs). Changes nothing.
+  verify <repo> [--json]          Check that every generated file is intact, then run both repository gates
+                                  (scripts/check-docs.mjs, scripts/check-sdd.mjs). Changes nothing.
   uninstall <repo> --write        Remove everything "apply" added: delete tool-owned files, take the managed
                                   block out of AGENTS.md, the import out of CLAUDE.md, the hook entries out
                                   of the settings files. Your own files stay. Asks you to type "uninstall"
@@ -280,6 +283,70 @@ function detectRuntimeRoots(root) {
   return found.length ? found : ['src'];
 }
 
+/**
+ * Module roots for scripts/check-docs.mjs: folders whose every child is a module that needs a SPEC.md.
+ * Detected once, from the workspace layout "<runtime root>/<workspace>/src/modules"; the repository owns the list
+ * afterwards in .agent-sdd/config.json.
+ */
+function detectModuleRoots(root, runtimeRoots) {
+  const out = [];
+  for (const runtimeRoot of runtimeRoots) {
+    const base = join(root, runtimeRoot);
+    if (!existsSync(base) || !statSync(base).isDirectory()) continue;
+    const hasModules = readdirSync(base).some((name) => existsSync(join(base, name, 'src', 'modules')));
+    if (hasModules) out.push(`${runtimeRoot}/*/src/modules`);
+  }
+  return out;
+}
+
+const RULES_INDEX = '.claude/rules/INDEX.md';
+
+/** Human index of the shipped Claude rules. Not a rule itself: no Cursor mirror, no parity partner. */
+function rulesIndexContent(rules) {
+  const rows = rules.map(([path, body]) => {
+    const name = basename(path);
+    const rule = parseRule(body);
+    const workflow = body.match(/\[([^\]]+)\]\((\.\.\/\.\.\/docs\/workflows\/[^)#]+\.md)(#[^)]*)?\)/);
+    const workflowCell = workflow ? `[${basename(workflow[2], '.md')}](${workflow[2]}${workflow[3] ?? ''})` : '-';
+    const scope = rule?.paths?.length ? rule.paths.map((glob) => `\`${glob}\``).join(', ') : '(no glob: loads for every task)';
+    const trigger = (rule?.description ?? '').replace(/\|/g, '\\|');
+    return `| [${name}](${name}) | ${scope} | ${workflowCell} | ${trigger} |`;
+  });
+  return `# Project rules
+
+Thin Claude Code adapters. Each rule is frontmatter (\`description\`, \`type\`, optional \`paths\` globs) plus one
+link to its canonical workflow under [docs/workflows/](../../docs/workflows/AGENT-PARITY-WORKFLOW.md). The body
+of the rule, the **why** and the **how to apply**, lives in that workflow, never here.
+
+Claude Code loads a rule when a file matching its \`paths\` glob is touched; a rule without \`paths\` loads for
+every task. Cursor gets the generated \`.cursor/rules/<name>.mdc\`; Codex gets \`.agents/skills/<name>\`.
+
+## Naming
+
+- kebab-case \`.md\` only (no underscores, no spaces).
+- The file name describes the **scope** of the rule, not the incident that produced it.
+- The same \`<name>\` in every harness: \`.claude/rules/<name>.md\`, \`.agents/skills/<name>/\`,
+  \`.cursor/rules/<name>.mdc\`.
+
+## Contents
+
+| Rule | Scope | Workflow | Trigger |
+|---|---|---|---|
+${rows.join('\n')}
+
+## Editing
+
+- Every workflow keeps its **Why** and **How to apply** sections. The why is what lets a future reader judge an
+  edge case the rule does not name; a rule stripped to its assertion gets deleted the first time it is inconvenient.
+- The why cites the **real** incident. A rule justified by an invented example cannot be checked, so it cannot be
+  maintained.
+- A rule body carries no tool-specific tokens (\`Skill("...")\`, "Claude-specific"): \`scripts/gen-cursor-rules.mjs\`
+  refuses them, because the Cursor mirror copies the body verbatim.
+- Add, remove, or rename a rule: update this index, the \`.agents/skills/<name>\` adapter, the workflow's adapter
+  list, and run \`node scripts/gen-cursor-rules.mjs\`, all in the same change. The gate checks the links both ways.
+`;
+}
+
 function existingConfig(root) {
   const path = join(root, CONFIG);
   if (!existsSync(path)) return null;
@@ -305,19 +372,24 @@ function desiredFiles(root, profiles, agents) {
     if (!profiles.includes(entry.profile)) continue;
     output.set(entry.path, read(assetSource(entry.path)));
   }
+  const rules = [];
   for (const [path, content] of [...output]) {
     const match = path.match(/^\.claude\/rules\/([^/]+\.md)$/);
     if (!match || match[1] === 'INDEX.md') continue;
+    rules.push([path, content]);
     const mirror = toMdc(match[1], content);
     output.set(`.cursor/rules/${mirror.file}`, mirror.content);
   }
+  if (rules.length) output.set(RULES_INDEX, rulesIndexContent(rules));
 
   const current = existingConfig(root);
+  const runtimeRoots = current?.runtimeRoots ?? detectRuntimeRoots(root);
   const nextConfig = {
     schemaVersion: 1,
     profiles,
     agents,
-    runtimeRoots: current?.runtimeRoots ?? detectRuntimeRoots(root),
+    runtimeRoots,
+    moduleRoots: current?.moduleRoots ?? detectModuleRoots(root, runtimeRoots),
     exclude: current?.exclude ?? ['node_modules', 'dist', 'build', 'coverage', 'vendor'],
     configGroups: current?.configGroups ?? [],
     helmCharts: current?.helmCharts ?? [],
@@ -424,13 +496,25 @@ function hookContent(root, agent) {
   return `${JSON.stringify(mergeHookConfig(agent, current), null, 2)}\n`;
 }
 
-function agentsContent(root, allowMerge) {
+function agentsContent(root, allowMerge, record = null) {
   const fragment = read(join(ASSET_ROOT, 'AGENTS.fragment.md')).trim();
   const path = join(root, 'AGENTS.md');
   if (!existsSync(path)) return { action: 'create', content: `${AGENTS_DEFAULT_HEADER}\n\n${fragment}\n` };
   const current = read(path);
   const replaced = replaceBlock(current, fragment, AGENTS_START, AGENTS_END);
-  if (replaced !== null) return { action: replaced === current ? 'preserve' : 'update', content: replaced };
+  if (replaced !== null) {
+    if (replaced === current) return { action: 'preserve', content: current };
+    // Text between the markers was edited after install: an upgrade would silently drop that text.
+    const block = managedBlock(current, AGENTS_START, AGENTS_END);
+    if (record?.kind === 'managed-block' && sha(block ?? '') !== record.sha256) {
+      return {
+        action: 'keep',
+        content: null,
+        reason: `the text between the ${AGENTS_START} markers was edited after install, so this upgrade keeps your version. Move repository-specific text outside the markers, then run "apply <repo> --write --replace AGENTS.md" to take the new block.`,
+      };
+    }
+    return { action: 'update', content: replaced };
+  }
   if (!allowMerge) {
     return {
       action: 'conflict',
@@ -481,6 +565,7 @@ function plan(root, profiles, agents, allowMerge = false, replace = []) {
   const desiredPaths = new Set([...desired].map(([path]) => path));
   const replaced = new Set(replace);
   for (const path of replaced) {
+    if (path === 'AGENTS.md') continue; // takes the new managed block even when the old one was edited
     if (!desiredPaths.has(path) || path === CONFIG) {
       throw new Error(`--replace ${path}: not a file this tool generates for the selected profiles. Run "plan <repo>" to see the tool-owned files.`);
     }
@@ -527,7 +612,7 @@ function plan(root, profiles, agents, allowMerge = false, replace = []) {
         path,
         action: 'conflict',
         content: null,
-        reason: 'the file already exists and was not created by this tool. Keep your version by moving it aside, or drop the profile that ships it (--profiles).',
+        reason: `the file already exists and was not created by this tool. Keep your version by moving it aside, drop the profile that ships it (--profiles), or adopt the tool version with "apply <repo> --write --replace ${path}" after comparing the two.`,
       });
     }
   }
@@ -540,7 +625,7 @@ function plan(root, profiles, agents, allowMerge = false, replace = []) {
       : { path: WAIVERS, action: 'create', content: '[]\n' },
   );
 
-  const agentsPlan = agentsContent(root, allowMerge);
+  const agentsPlan = agentsContent(root, allowMerge, replaced.has('AGENTS.md') ? null : manifest?.managedFiles?.['AGENTS.md']);
   actions.push({ path: 'AGENTS.md', ...agentsPlan });
   const claude = claudeContent(root, allowMerge, agents.includes('claude'));
   if (claude) actions.push({ path: 'CLAUDE.md', ...claude });
@@ -909,15 +994,25 @@ function verify(root) {
     }
   }
 
-  const gate = join(root, 'scripts', 'check-sdd.mjs');
-  let gateResult = null;
-  if (existsSync(gate)) {
+  // Both generated gates run: check-docs (documents exist and are wired) then check-sdd (shapes, evidence, parity).
+  const stdout = [];
+  const stderr = [];
+  let status = 0;
+  for (const name of ['scripts/check-docs.mjs', 'scripts/check-sdd.mjs']) {
+    const gate = join(root, name);
+    if (!existsSync(gate)) {
+      errors.push(`${name} is missing. Run "apply <repo> --write" to recreate the gate.`);
+      continue;
+    }
     const result = spawnSync(process.execPath, [gate], { cwd: root, encoding: 'utf8' });
-    gateResult = { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
-    if (result.status !== 0) errors.push('the repository gate (scripts/check-sdd.mjs) reported problems; see the lines above for what to fix.');
-  } else {
-    errors.push('scripts/check-sdd.mjs is missing. Run "apply <repo> --write" to recreate the gate.');
+    if (result.stdout.trim()) stdout.push(result.stdout.trim());
+    if (result.stderr.trim()) stderr.push(result.stderr.trim());
+    if (result.status !== 0) {
+      status = result.status ?? 1;
+      errors.push(`the repository gate (${name}) reported problems; see the lines above for what to fix.`);
+    }
   }
+  const gateResult = { status, stdout: stdout.join('\n'), stderr: stderr.join('\n') };
   return { ok: errors.length === 0, errors, gate: gateResult };
 }
 
@@ -1079,7 +1174,8 @@ async function main() {
     applyUninstall(value);
     console.log(`\nUninstalled cross-agent-sdd from ${root}. Review the diff with "git status" and commit it.
 Things this tool cannot undo for you:
-  - lines you added to Git hooks (pre-commit, commit-msg) or CI that run scripts/check-sdd.mjs: remove them;
+  - lines you added to Git hooks (pre-commit, commit-msg) or CI that run scripts/check-docs.mjs or
+    scripts/check-sdd.mjs: remove them;
   - package.json script aliases you added for the gate;
   - your own SPEC.md files: they stay and remain useful without the gate.`);
     return;
@@ -1105,14 +1201,16 @@ Things this tool cannot undo for you:
     }
     applyPlan(value);
     console.log(`\nApplied cross-agent-sdd ${VERSION}. Next steps:
-  1. Open .agent-sdd/config.json: make sure "runtimeRoots" lists the folders that hold application code, and
-     add archived docs (old plans, samples) to "exclude" so their stale links do not fail the gate.
-  2. Run "node scripts/check-sdd.mjs" and fix what it reports. Each line says what is wrong and how to fix it.
-  3. Wire the gate into Git hooks and CI:
-       pre-commit:  node scripts/check-sdd.mjs
+  1. Open .agent-sdd/config.json: make sure "runtimeRoots" lists the folders that hold application code,
+     "moduleRoots" lists the folders whose children are modules that need a SPEC.md (for example
+     "apps/*/src/modules"), and archived docs (old plans, samples) are in "exclude".
+  2. Run "node scripts/check-docs.mjs" and "node scripts/check-sdd.mjs"; fix what they report. Each line says
+     what is wrong and how to fix it.
+  3. Wire both gates into Git hooks and CI:
+       pre-commit:  node scripts/check-docs.mjs && node scripts/check-sdd.mjs
        commit-msg:  node scripts/check-sdd.mjs --staged --commit-msg $1
-       CI:          node scripts/check-sdd.mjs --changed
-  4. Run "verify <repo>" to confirm every generated file is intact and the gate is green.
+       CI:          node scripts/check-docs.mjs && node scripts/check-sdd.mjs && node scripts/check-sdd.mjs --changed
+  4. Run "verify <repo>" to confirm every generated file is intact and both gates are green.
   5. Commit the new files together (this tool never commits for you).
 To remove everything later: "uninstall <repo> --write".`);
     return;

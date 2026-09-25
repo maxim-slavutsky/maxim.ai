@@ -57,7 +57,11 @@ const enabledAgents = new Set(config?.agents?.length ? config.agents : Object.ke
 // Other tool skills installed in-repo go into "exclude" in .agent-sdd/config.json.
 const TOOL_SKILL_DIRS = ['.claude/skills/cross-agent-sdd', '.agents/skills/cross-agent-sdd', '.cursor/skills/cross-agent-sdd'];
 const skippedNames = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.turbo']);
-const skippedPrefixes = [...TOOL_SKILL_DIRS];
+// Claude Code keeps its worktrees inside the checkout (.claude/worktrees/<name>), each one a full copy of the
+// repository. Reading them from the main checkout reports every SPEC twice ("duplicate SPEC id") and blocks every
+// commit while any worktree exists. Skipped by path, not by name: "worktrees" is too ordinary a name to skip anywhere.
+const WORKTREE_DIRS = ['.claude/worktrees'];
+const skippedPrefixes = [...TOOL_SKILL_DIRS, ...WORKTREE_DIRS];
 for (const entry of config?.exclude ?? []) {
   const value = String(entry).replaceAll('\\', '/').replace(/^\.?\//, '').replace(/\/+$/, '');
   if (!value) continue;
@@ -483,8 +487,21 @@ function ownerFor(path) {
   return existsSync(agents) ? rel(agents) : null;
 }
 
+/**
+ * Reads `<name>: none - <reason>` from a commit message. The reason may fold over several lines the way Git
+ * trailers fold: every following line that starts with whitespace continues it. Commit linters cap a body line
+ * (commitlint: 100 characters) and a reason that names several files does not fit on one line.
+ */
 function trailer(message, name) {
-  return message.match(new RegExp(`^${name}:\\s*none\\s*(?:--|—|–|-)\\s*(.*)$`, 'im'))?.[1]?.trim() ?? null;
+  const match = message.match(new RegExp(`^${name}:\\s*none\\s*(?:--|—|–|-)\\s*(.*)$`, 'im'));
+  if (!match) return null;
+  const following = message.slice(match.index + match[0].length).split(/\r?\n/).slice(1);
+  const folded = [match[1]];
+  for (const line of following) {
+    if (!/^[ \t]+\S/.test(line)) break;
+    folded.push(line.trim());
+  }
+  return folded.join(' ').trim();
 }
 
 /** Words that carry no auditable information about why behavior cannot change. */

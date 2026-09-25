@@ -1,6 +1,6 @@
 ---
 name: Runtime application config parity
-description: Propagate runtime config shape changes through every maintained surface.
+description: Adding, removing, or renaming a runtime config key: update every surface (validator, local and shipped copies, test fixtures, chart config, values placeholders, typed reader, owning SPEC) in the same change.
 type: feedback
 paths:
   - "**/config/**"
@@ -10,5 +10,9 @@ paths:
   - "**/values*.yml"
 ---
 
-Read [canonical application config workflow](../../docs/workflows/APP-CONFIG-WORKFLOW.md) before editing. This file owns
-path matching only; do not duplicate shared policy here.
+# Runtime application config parity
+
+Adapter, path matching only (`**/config/**`, `**/configs/**`, `**/chart/**`, `**/values*.yaml`, `**/values*.yml`).
+The surfaces, the **why**, and the **how to apply** live in the
+[canonical application config workflow](../../docs/workflows/APP-CONFIG-WORKFLOW.md). Read it before editing. Do not
+duplicate shared policy here.

@@ -10,6 +10,11 @@ critical:
   - V7
   - V8
   - V9
+  - V10
+  - V11
+  - V12
+  - V13
+  - V14
 ---
 
 # Cross-agent SDD generated gates
@@ -51,6 +56,21 @@ needs no partner.
 V9: gate ⊥ reads `.claude/skills/cross-agent-sdd/`, `.agents/skills/cross-agent-sdd/`,
 `.cursor/skills/cross-agent-sdd/` (skill installed in-repo = tooling, ≠ policy): no doc links, SPEC ids,
 adapter shape, parity, or change-impact from those paths.
+V10: `Spec-Impact: none - <reason>` | `Agent-Parity: none - <reason>` reason folds git-trailer style: ∀ following
+line starting w/ whitespace = continuation, joined w/ space; line w/o leading whitespace ends reason. Commit linters
+cap body lines @ 100 chars ∴ reason naming ≥5 files ⊥ fits 1 line.
+V11: `scripts/check-docs.mjs` (core) fails on: workspace (dir w/ package manifest) under `runtimeRoots` w/o
+`AGENTS.md`; module dir under `moduleRoots` glob (`*` = 1 segment) w/o `SPEC.md`; module `SPEC.md` ⊥ linked
+(`<module>/SPEC.md` substring) from nearest `AGENTS.md` above; `sdd` profile & root `AGENTS.md` w/o line
+`@./docs/workflows/SPEC-FIRST-WORKFLOW.md`. Existence only, ⊥ content. `verify` runs check-docs then check-sdd;
+either red → verify red. `moduleRoots` detected once (`<runtimeRoot>/*/src/modules` when ∃), then config-owned.
+V12: both gates skip `.claude/worktrees/` prefix always (⊥ via config): Claude Code worktree = full repo copy
+inside checkout ∴ duplicate SPEC ids & dangling links from another branch.
+V13: managed `AGENTS.md` block hash ≠ manifest record → plan `keep` w/ reason, apply proceeds for rest; ⊥ silent
+overwrite of text inside markers. `apply --write --replace AGENTS.md` → `update`, new block written.
+V14: `.claude/rules/INDEX.md` generated @ apply from shipped `.claude/rules/*.md` (rule | scope globs | workflow
+link | description); recorded `generated`; ⊥ `.mdc` mirror, ⊥ `.agents` twin, ⊥ parity partner. Repository-owned
+after edit (V7 `keep`).
 
 ## Bugs
 
@@ -67,3 +87,8 @@ B8|2026-09-19|hook config partner group included changed file ∴ matcher-only c
 B9|2026-09-19|re-apply w/ fewer profiles rebuilt manifest from plan only ∴ optional-profile files lost ownership, uninstall missed them|V7
 B10|2026-09-19|edited generated file = `conflict` ∴ whole apply blocked; message & README promised skip|V7 `keep`
 B11|2026-09-20|`partnerGroups` paired `.claude/rules/INDEX.md` w/ `.cursor/rules/INDEX.mdc` ∴ every commit touching the index needed an `Agent-Parity` trailer (generator + adapter check already skipped it)|V2 partner check skips `INDEX`
+B12|2026-09-23|trailer regex read 1 line; commitlint caps 100 chars ∴ 60-file commit bounced 3× between 2 gates (healthchecker_mono)|V10 fold
+B13|2026-09-21|Claude Code worktrees nested in `.claude/worktrees` ∴ every SPEC read twice → `duplicate SPEC id` ∀ module, both hooks blocked ∀ commit while any worktree existed (healthchecker_mono)|V12
+B14|2026-09-25|gate checked link reachability only ∴ new app | module w/o `AGENTS.md` | `SPEC.md` passed green; healthchecker_mono hand-wrote `check-docs.mjs`|V11
+B15|2026-09-25|`agentsContent` replaced managed block unconditionally ∴ upgrade silently dropped a section hand-inserted inside markers (healthchecker_mono `## Adding an app or package`)|V13
+B16|2026-09-25|no rule index shipped ∴ ∀ repo hand-wrote `.claude/rules/INDEX.md` (scope, workflow, trigger per rule)|V14

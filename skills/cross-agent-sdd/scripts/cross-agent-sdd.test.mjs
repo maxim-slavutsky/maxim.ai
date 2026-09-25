@@ -856,14 +856,14 @@ test('apply --replace takes the tool version back with the documented pre-commit
 test('a workflow back-link to the Claude rule covers its generated Cursor mirror [@spec cross-agent-sdd.gates:V5]', () => {
   const root = installed();
   const workflow = join(root, 'docs', 'workflows', 'SPEC-FIRST-WORKFLOW.md');
-  const withoutMirrorLink = readFileSync(workflow, 'utf8').replace(/^- \[Cursor rule\]\(\.\.\/\.\.\/\.cursor\/rules\/spec-first\.mdc\)\r?\n/m, '');
+  const withoutMirrorLink = readFileSync(workflow, 'utf8').replace(/^- \[Cursor rule\]\(\.\.\/\.\.\/\.cursor\/rules\/spec-first\.mdc\)[^\n]*\r?\n/m, '');
   assert.notEqual(withoutMirrorLink, readFileSync(workflow, 'utf8'), 'fixture must drop the .mdc link');
   writeFileSync(workflow, withoutMirrorLink, 'utf8');
   let checked = gate(root);
   assert.equal(checked.status, 0, checked.stderr);
 
   // Without the rule link either, the gate names the source rule, not only the mirror.
-  writeFileSync(workflow, withoutMirrorLink.replace(/^- \[Claude Code rule\]\(\.\.\/\.\.\/\.claude\/rules\/spec-first\.md\)\r?\n/m, ''), 'utf8');
+  writeFileSync(workflow, withoutMirrorLink.replace(/^- \[Claude Code rule\]\(\.\.\/\.\.\/\.claude\/rules\/spec-first\.md\)[^\n]*\r?\n/m, ''), 'utf8');
   checked = gate(root);
   assert.notEqual(checked.status, 0);
   assert.match(checked.stderr, /does not link back to \.claude\/rules\/spec-first\.md/);
@@ -899,4 +899,143 @@ test('adopting a preserved file makes it tool-owned, by --replace or by delete a
   git(byDelete, ['commit', '-m', 'chore: drop the old copy']);
   assert.equal(run(['apply', byDelete, '--write']).status, 0);
   assert.equal(mode(byDelete), 'created');
+});
+
+test('a Spec-Impact reason may fold over continuation lines, like a Git trailer [@spec cross-agent-sdd.gates:V10]', () => {
+  const root = installed();
+  const message = join(root, 'msg.txt');
+  mkdirSync(join(root, 'src'), { recursive: true });
+  writeFileSync(join(root, 'src', 'folded.js'), 'export const value = 1;\n', 'utf8');
+  git(root, ['add', 'src/folded.js']);
+
+  // Folded: the continuation line starts with whitespace and carries the file name the gate needs.
+  writeFileSync(
+    message,
+    'feat: fold\n\nSpec-Impact: none - exports a fixture constant without observable runtime behavior,\n src/folded.js is the only path and stays a constant\n',
+    'utf8',
+  );
+  let checked = gate(root, ['--staged', '--commit-msg', message]);
+  assert.equal(checked.status, 0, `folded reason must be joined: ${checked.stderr}`);
+
+  // Not folded: a following line without leading whitespace is a new paragraph, not part of the reason.
+  writeFileSync(
+    message,
+    'feat: fold\n\nSpec-Impact: none - exports a fixture constant without observable runtime behavior,\nsrc/folded.js is the only path and stays a constant\n',
+    'utf8',
+  );
+  checked = gate(root, ['--staged', '--commit-msg', message]);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /does not name src\/folded\.js/);
+});
+
+test('check-docs demands AGENTS.md per workspace, SPEC.md per module, the SPEC link, and the workflow import [@spec cross-agent-sdd.gates:V11]', () => {
+  const root = fixture();
+  mkdirSync(join(root, 'apps', 'api', 'src', 'modules', 'auth'), { recursive: true });
+  writeFileSync(join(root, 'apps', 'api', 'package.json'), '{ "name": "api" }\n', 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'chore: workspace layout']);
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  const config = JSON.parse(readFileSync(join(root, '.agent-sdd', 'config.json'), 'utf8'));
+  assert.deepEqual(config.moduleRoots, ['apps/*/src/modules'], 'module roots detected from the workspace layout');
+
+  const docs = (args = []) => spawnSync(process.execPath, [join(root, 'scripts', 'check-docs.mjs'), ...args], { cwd: root, encoding: 'utf8' });
+  let checked = docs();
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /missing AGENTS\.md: apps\/api/);
+  assert.match(checked.stderr, /missing SPEC\.md: apps\/api\/src\/modules\/auth/);
+
+  writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n', 'utf8');
+  writeFileSync(join(root, 'apps', 'api', 'src', 'modules', 'auth', 'SPEC.md'), '---\nid: api.auth\n---\n\n# auth\n\n## §G\n\nlogin\n', 'utf8');
+  checked = docs();
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/src\/modules\/auth\/SPEC\.md/);
+
+  writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n\n| Module | Spec |\n|---|---|\n| auth | [auth/SPEC.md](src/modules/auth/SPEC.md) |\n', 'utf8');
+  checked = docs();
+  assert.equal(checked.status, 0, checked.stderr);
+  assert.match(checked.stdout, /check-docs: ok/);
+
+  // The root AGENTS.md import is what keeps the working rules in context; dropping it is a gate failure.
+  const agentsPath = join(root, 'AGENTS.md');
+  const agents = readFileSync(agentsPath, 'utf8');
+  assert.match(agents, /^@\.\/docs\/workflows\/SPEC-FIRST-WORKFLOW\.md$/m);
+  writeFileSync(agentsPath, agents.replace(/^@\.\/docs\/workflows\/SPEC-FIRST-WORKFLOW\.md$/m, ''), 'utf8');
+  checked = docs();
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /no longer imports the working rules/);
+  writeFileSync(agentsPath, agents, 'utf8');
+
+  // verify runs check-docs too, so a missing module SPEC fails verify.
+  writeFileSync(join(root, 'AGENTS.md'), `${agents}\n- [api](apps/api/AGENTS.md)\n`, 'utf8');
+  rmSync(join(root, 'apps', 'api', 'src', 'modules', 'auth', 'SPEC.md'));
+  writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n', 'utf8');
+  const verified = run(['verify', root]);
+  assert.notEqual(verified.status, 0);
+  assert.match(verified.stderr, /scripts\/check-docs\.mjs\) reported problems/);
+});
+
+test('both gates skip Claude Code worktrees nested inside the checkout [@spec cross-agent-sdd.gates:V12]', () => {
+  const root = installed();
+  const spec = '---\nid: acme.core\n---\n\n# Core\n\nV1: Fixture holds.\n';
+  mkdirSync(join(root, 'src'), { recursive: true });
+  writeFileSync(join(root, 'src', 'SPEC.md'), spec, 'utf8');
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\n[core](src/SPEC.md)\n', 'utf8');
+  // A worktree is a full copy of the repository: the same SPEC id again, and a broken link.
+  mkdirSync(join(root, '.claude', 'worktrees', 'feature-x', 'src'), { recursive: true });
+  writeFileSync(join(root, '.claude', 'worktrees', 'feature-x', 'src', 'SPEC.md'), spec, 'utf8');
+  writeFileSync(join(root, '.claude', 'worktrees', 'feature-x', 'README.md'), '[gone](missing.md)\n', 'utf8');
+  mkdirSync(join(root, '.claude', 'worktrees', 'feature-x', 'apps', 'api', 'src', 'modules', 'auth'), { recursive: true });
+  writeFileSync(join(root, '.claude', 'worktrees', 'feature-x', 'apps', 'api', 'package.json'), '{}\n', 'utf8');
+
+  const checked = gate(root);
+  assert.equal(checked.status, 0, `duplicate id inside a worktree must be ignored: ${checked.stderr}`);
+  const docs = spawnSync(process.execPath, [join(root, 'scripts', 'check-docs.mjs')], { cwd: root, encoding: 'utf8' });
+  assert.equal(docs.status, 0, docs.stderr);
+});
+
+test('an edited managed AGENTS block is kept by upgrades until --replace AGENTS.md [@spec cross-agent-sdd.gates:V13]', () => {
+  const root = installed();
+  const agentsPath = join(root, 'AGENTS.md');
+  const edited = readFileSync(agentsPath, 'utf8').replace(
+    '<!-- cross-agent-sdd:end -->',
+    '## Team notes\n\nDeploy through make deploy.\n<!-- cross-agent-sdd:end -->',
+  );
+  writeFileSync(agentsPath, edited, 'utf8');
+  git(root, ['add', 'AGENTS.md']);
+  git(root, ['commit', '-q', '-m', 'docs: notes inside the managed block']);
+
+  const planned = run(['plan', root]);
+  assert.equal(planned.status, 0, planned.stderr);
+  assert.match(planned.stdout, /keep\s+AGENTS\.md/);
+  assert.match(planned.stdout, /AGENTS\.md: the text between the [^\n]*edited after install/);
+  assert.match(planned.stdout, /No conflicts\. Apply can run\./);
+
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.match(readFileSync(agentsPath, 'utf8'), /Deploy through make deploy/);
+
+  const replaced = run(['apply', root, '--write', '--replace', 'AGENTS.md', '--allow-dirty']);
+  assert.equal(replaced.status, 0, replaced.stderr);
+  assert.match(replaced.stdout, /update\s+AGENTS\.md/);
+  assert.doesNotMatch(readFileSync(agentsPath, 'utf8'), /Deploy through make deploy/);
+  const verified = run(['verify', root]);
+  assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`);
+});
+
+test('the rules index is generated from the shipped rules and stays out of parity checks [@spec cross-agent-sdd.gates:V14]', () => {
+  const root = installed();
+  const index = readFileSync(join(root, '.claude', 'rules', 'INDEX.md'), 'utf8');
+  for (const name of readdirSync(join(root, '.claude', 'rules'))) {
+    if (name === 'INDEX.md') continue;
+    const escaped = name.replace('.', '\\.');
+    assert.match(index, new RegExp(`\\[${escaped}\\]\\(${escaped}\\)`), `${name} listed`);
+  }
+  assert.match(index, /finishing-branch-commit-order\.md[^\n]*no glob: loads for every task/);
+  assert.equal(existsSync(join(root, '.cursor', 'rules', 'INDEX.mdc')), false);
+  assert.ok(existsSync(join(root, '.cursor', 'rules', 'finishing-branch-commit-order.mdc')));
+  const manifest = JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8'));
+  assert.equal(manifest.managedFiles['.claude/rules/INDEX.md'].kind, 'generated');
+  const checked = gate(root);
+  assert.equal(checked.status, 0, checked.stderr);
 });

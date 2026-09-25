@@ -93,15 +93,17 @@ With the default profiles (`core,sdd`) and all three tools:
 | `CLAUDE.md` | One line, `@AGENTS.md`, so Claude Code reads the same policy. Existing content is kept. | Claude Code |
 | `docs/workflows/*.md` | The actual procedures (SPEC-first, agent parity, commit). One copy, tool-neutral. | every tool, people |
 | `docs/agent-sdd/FORMAT.md` | Shapes of `SPEC.md`, `AGENTS.md`, and the session change log. | every tool, people |
-| `.claude/rules/*.md` | Claude Code path rules: when a file under `src/`, `apps/`, or `packages/` is edited, Claude reads the matching workflow first. Thin: one link each. | Claude Code |
+| `.claude/rules/*.md` | Claude Code path rules: when a file under `src/`, `apps/`, or `packages/` is edited, Claude reads the matching workflow first. Thin: one link each. One rule has no path (`finishing-branch-commit-order`): it loads for every task and makes the AI commit logged work before finishing a branch. | Claude Code |
+| `.claude/rules/INDEX.md` | Index of the rules: scope, workflow, trigger per rule, plus naming and editing conventions. Generated from the shipped rules; add rows for your own rules. | Claude Code, people |
 | `.cursor/rules/*.mdc` | Same rules for Cursor, generated from `.claude/rules` by `scripts/gen-cursor-rules.mjs`. Never edit by hand. | Cursor |
 | `.agents/skills/*/` | Codex and Cursor skills: thin adapters plus `agents/openai.yaml` display metadata. | Codex, Cursor |
 | `.claude/skills/commit-changes/` | Claude Code skill for the commit workflow. | Claude Code |
 | `.claude/settings.json`, `.codex/hooks.json`, `.cursor/hooks.json` | One post-edit hook per tool. Existing settings are kept; only the hook entry is added. | each tool |
 | `scripts/hooks/post-edit-reminder.mjs` | The hook script. After the AI edits a file it is reminded to log the change and run the gate. | each tool |
-| `scripts/check-sdd.mjs` | The gate. See [Gate reference](#gate-reference). | Git hooks, CI, people |
+| `scripts/check-docs.mjs` | The existence gate: every app or package has an `AGENTS.md`, every module has a linked `SPEC.md`, the root `AGENTS.md` still imports the working rules. See [Gate reference](#gate-reference). | Git hooks, CI, people |
+| `scripts/check-sdd.mjs` | The shape gate. See [Gate reference](#gate-reference). | Git hooks, CI, people |
 | `scripts/gen-cursor-rules.mjs` | Generator for `.cursor/rules`. | people, gate |
-| `.agent-sdd/config.json` | Gate configuration: which folders hold application code, what to skip, optional config groups and Helm charts. Edit this. | gate |
+| `.agent-sdd/config.json` | Gate configuration: which folders hold application code, which folders hold modules that need a `SPEC.md`, what to skip, optional config groups and Helm charts. Edit this. | gates |
 | `.agent-sdd/waivers.json` | Commits the CI gate may skip, with a reason. Starts empty. | gate |
 | `.agent-toolchain.json` | List of files this tool owns, with hashes, so upgrades replace only untouched files. | this tool |
 | `.gitignore` | Adds `changes-log.md`. | Git |
@@ -118,10 +120,16 @@ The tool never commits, pushes, or opens pull requests. Review the diff, then co
 
 - **Specs live next to code.** A folder with important behavior gets a `SPEC.md` with a stable `id:` and
   numbered invariants (`V1:`, `V2:` ...). Invariants listed under `critical:` must be proven by a test that
-  contains `@spec <id>:V<n>` in its title or a comment.
+  contains `@spec <id>:V<n>` in its title or a comment. `SPEC.md` files use a compressed encoding (short
+  section headings `§G §C §I §V §T §B §F`, symbols, pipe tables) described in `docs/agent-sdd/FORMAT.md`; every
+  other document is plain English.
+- **Documents must exist.** Every app or package folder needs an `AGENTS.md`; every module folder under
+  `moduleRoots` needs a `SPEC.md` linked from its `AGENTS.md`. The `check-docs` gate stops a commit that adds a
+  module without one.
 - **Change the code, change the spec.** When a commit touches application code but not the `SPEC.md` or
-  `AGENTS.md` that owns it, the gate stops the commit unless the message explains why in one line:
-  `Spec-Impact: none - <at least 8 words naming the files and why behavior cannot change>`.
+  `AGENTS.md` that owns it, the gate stops the commit unless the message explains why:
+  `Spec-Impact: none - <at least 8 words naming the files and why behavior cannot change>`. A long reason folds
+  over several lines; each continuation line starts with one space, like a Git trailer.
 - **Tools move together.** Editing a Claude rule, a Codex skill, or a hook config without its counterparts
   fails the gate unless the message says why: `Agent-Parity: none - <reason naming the files>`.
 - **AI sessions leave a trail.** The hook reminds the AI to append what it changed to `changes-log.md`
@@ -143,7 +151,7 @@ Running from a checkout of this repository instead: `node skills/cross-agent-sdd
 | `audit <repo> [--json]` | no | Report branch, existing agent files, SPEC count, config-like files, Helm charts, CI type, and suggested profiles. |
 | `plan <repo> [options]` | no | List every file `apply` would create, keep, merge, update, or refuse, with a reason for each conflict. |
 | `apply <repo> [options]` | only with `--write` | Write the planned files atomically. Refuses when the plan has conflicts or the working tree has uncommitted changes. Prints next steps. |
-| `verify <repo> [--json]` | no | Check every tool-owned file against its recorded hash, check hook configs, then run `scripts/check-sdd.mjs`. Exit code 1 on any problem. |
+| `verify <repo> [--json]` | no | Check every tool-owned file against its recorded hash, check hook configs, then run `scripts/check-docs.mjs` and `scripts/check-sdd.mjs`. Exit code 1 on any problem. |
 | `install-skill [options]` | only with `--write` | Copy the skill into your home folder or a repository. |
 | `version` | no | Print the version. |
 | `help` | no | Print usage. |
@@ -173,20 +181,24 @@ Exit codes: `0` success or clean dry run, `1` any error, conflict, or failed ver
 
 ## Gate reference
 
-Installed at `scripts/check-sdd.mjs`. Three modes:
+Two scripts. `scripts/check-docs.mjs` checks that documents exist; `scripts/check-sdd.mjs` checks their shape and
+each commit.
 
 | Command | When | Checks |
 |---|---|---|
+| `node scripts/check-docs.mjs` | pre-commit hook, CI, any time | Every workspace under `runtimeRoots` (a folder with a package manifest) has an `AGENTS.md`; every module under `moduleRoots` has a `SPEC.md`; that SPEC is linked from the nearest `AGENTS.md`; the root `AGENTS.md` still contains the line `@./docs/workflows/SPEC-FIRST-WORKFLOW.md`. |
 | `node scripts/check-sdd.mjs` | pre-commit hook, CI, any time | Markdown links resolve; every `AGENTS.md`/`SPEC.md` is linked from somewhere; SPEC ids unique; critical invariants have `@spec` evidence in a test file; Claude/Codex/Cursor files have their partners; `.cursor/rules` match `.claude/rules`; hook configs call the shared script; config groups and Helm charts (when those profiles are on). |
 | `node scripts/check-sdd.mjs --staged --commit-msg <path>` | commit-msg hook (`$1`) | Everything above plus: staged application files changed with their owning `SPEC.md`/`AGENTS.md`, or the message carries an accepted `Spec-Impact: none -` line; harness files changed with partners, or `Agent-Parity: none -`. |
 | `node scripts/check-sdd.mjs --changed [--base <ref>]` | CI | Same per-commit checks for every commit since the base, honoring `.agent-sdd/waivers.json`. |
 
-CI must run both the static command and `--changed`. The static command alone passes a commit that changed
-code without its `SPEC.md`, because it never looks at what a commit changed. Example CI step:
+CI must run the static commands and `--changed`. The static commands alone pass a commit that changed
+code without its `SPEC.md`, because they never look at what a commit changed. Example CI step:
 
 ```bash
-node scripts/check-sdd.mjs && node scripts/check-sdd.mjs --changed
+node scripts/check-docs.mjs && node scripts/check-sdd.mjs && node scripts/check-sdd.mjs --changed
 ```
+
+Call `node` directly in hooks: a package-manager wrapper (`pnpm check-sdd`) adds seconds of start-up per gate.
 
 Base for `--changed`, first match wins: `--base`, `SDD_BASE_REF`, `origin/<CHANGE_TARGET>` then
 `<CHANGE_TARGET>`, `GIT_PREVIOUS_COMMIT`, `GIT_PREVIOUS_SUCCESSFUL_COMMIT`, `HEAD^`. An explicit value that
@@ -196,8 +208,9 @@ Git cannot resolve fails the gate instead of silently checking one commit.
 
 | Key | Meaning |
 |---|---|
-| `runtimeRoots` | Folders that hold application code (`apps`, `packages`, `src` ...). Files here need an owning `SPEC.md` or `AGENTS.md`. |
-| `exclude` | Names skipped anywhere (`vendor`) or repo-relative prefixes (`apps/samples`). |
+| `runtimeRoots` | Folders that hold application code (`apps`, `packages`, `src` ...). Files here need an owning `SPEC.md` or `AGENTS.md`; each workspace inside needs an `AGENTS.md`. |
+| `moduleRoots` | Folders whose direct children are modules that need a `SPEC.md` (`apps/*/src/modules`; `*` is one path segment). Detected once at install, yours afterwards. |
+| `exclude` | Names skipped anywhere (`vendor`) or repo-relative prefixes (`apps/samples`). `.claude/worktrees` is always skipped: Claude Code worktrees are full repository copies. |
 | `configGroups` | For the `config` profile: `{ name, source, surfaces: [{ path, mode: "json" \| "text" }] }`. |
 | `helmCharts` | For the `helm` profile: chart folders containing `Chart.yaml`. |
 | `agents`, `profiles` | What was installed; the gate uses `agents` to decide which partners to require. |
@@ -220,7 +233,20 @@ Every message ends with what to do. The most frequent ones:
 | `harness paths lack partner change` | A Claude/Codex/Cursor file changed alone. | Change the partner files too, or add `Agent-Parity: none - <reason>`. |
 | `.cursor/rules/<name>.mdc stale` | A Claude rule changed, the Cursor mirror did not. | `node scripts/gen-cursor-rules.mjs`, commit both. |
 | `unreachable SPEC.md` | Nothing links to that spec. | Link it from the nearest `AGENTS.md` or `README.md`. |
+| `missing AGENTS.md: <folder>` (from `check-docs`) | An app or package folder has no `AGENTS.md`. | Write one: purpose, commands, module SPEC table. |
+| `missing SPEC.md: <folder>` (from `check-docs`) | A module folder under `moduleRoots` has no `SPEC.md`. | Write it per `docs/agent-sdd/FORMAT.md` and link it from the app `AGENTS.md`, in the same commit. |
+| `AGENTS.md no longer imports the working rules` (from `check-docs`) | The `@./docs/workflows/SPEC-FIRST-WORKFLOW.md` line was removed. | Put the line back on its own line; without it the rules never reach Claude Code. |
+| `AGENTS.md: the text between the ... markers was edited` (from `plan`) | You wrote inside the managed block. | Upgrades keep your version. Move your text outside the markers, then `apply --write --replace AGENTS.md`. |
 | `managed file changed outside installer` (from `verify`) | A tool-owned file was hand-edited. | Keep the edit: `apply` then lists the file as `keep` and skips it on every upgrade, so you own it from now on. Or take the tool version back, see [Taking the tool version back](#taking-the-tool-version-back). Prefer `.agent-sdd/config.json` (`exclude`, `runtimeRoots`, `configGroups`) over editing the gate script, so upgrades keep working. |
+
+### Upgrading a repository set up by an older version
+
+Run `plan .` first. Files you never touched show `update-generated` and get the new text. Files you edited show
+`keep` and stay yours. A file the new version ships that your repository already wrote by hand (for example
+`scripts/check-docs.mjs`, `.claude/rules/INDEX.md`, `.claude/rules/finishing-branch-commit-order.md`) shows
+`conflict`: compare the two, then either move yours aside or adopt the tool version with
+`apply . --write --replace <path>`. `verify` then runs both gates; a new `moduleRoots` key appears in
+`.agent-sdd/config.json` (empty when the layout was not detected; fill it in).
 
 ### Taking the tool version back
 
@@ -268,7 +294,7 @@ What happens:
 Options: `--write` perform; `--yes` skip the typed confirmation (for scripts, only after a person confirmed);
 `--force` also delete edited tool files; `--allow-dirty` run with uncommitted changes present.
 
-Not undone automatically: lines you added to Git hooks, CI, or `package.json` that run `scripts/check-sdd.mjs`.
+Not undone automatically: lines you added to Git hooks, CI, or `package.json` that run `scripts/check-docs.mjs` or `scripts/check-sdd.mjs`.
 The command reminds you at the end.
 
 To remove the skill copies from your machine:
