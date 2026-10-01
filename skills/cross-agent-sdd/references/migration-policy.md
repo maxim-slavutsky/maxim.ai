@@ -10,8 +10,10 @@ Read when audit reports existing instructions, specs, hooks, gates, or conflicti
 | Generated + unchanged | Safe to upgrade |
 | Generated + locally modified | Kept as is (`keep`); upgrade skips it. To take the tool version: `apply --write --replace <path>` |
 | Pre-existing, identical to template at first apply (`mode: preserved`) | Repository-owned. Never upgraded, never policed by `verify`, never deleted by `uninstall`. Adopt with `apply --write --replace <path>` |
-| Managed `AGENTS.md` block edited inside the markers | Kept as is (`keep`); the upgrade never drops text inside the markers. Move repository text outside the markers, then `apply --write --replace AGENTS.md` |
-| User-owned compatible | Preserve; add link or managed block only after review |
+| 0.4.0 `AGENTS.md` block, unedited | Swapped for the import line `@./docs/workflows/SPEC-FIRST-WORKFLOW.md` (`update`); text outside the markers stays |
+| 0.4.0 `AGENTS.md` block edited inside the markers | Kept as is (`keep`); the upgrade never drops text inside the markers. Move repository text outside the markers, then `apply --write --replace AGENTS.md` |
+| File an older version generated and this one no longer ships (`.claude/rules/INDEX.md`) | Unedited: deleted (`delete`). Edited: kept and still tracked (`keep`); move its content where the plan says, then delete it by hand |
+| User-owned compatible | Preserve; add the import line only after review (`--merge-agents`) |
 | User-owned conflicting | Stop and choose canonical owner explicitly |
 
 ## Migration order

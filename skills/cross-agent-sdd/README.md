@@ -89,12 +89,11 @@ With the default profiles (`core,sdd`) and all three tools:
 
 | Path | What it is | Who reads it |
 |---|---|---|
-| `AGENTS.md` | Standing repository policy. Created if missing; if it exists, a marked block is appended only when you pass `--merge-agents`. Your own text is never changed. | Codex, Cursor, people |
+| `AGENTS.md` | Standing repository policy. The tool owns one line, `@./docs/workflows/SPEC-FIRST-WORKFLOW.md`, which keeps the working rules in Claude Code's context; it repeats nothing from that workflow. Created if missing; an existing file without the line gets it appended only when you pass `--merge-agents`. Your own text is never changed. | Codex, Cursor, people |
 | `CLAUDE.md` | One line, `@AGENTS.md`, so Claude Code reads the same policy. Existing content is kept. | Claude Code |
-| `docs/workflows/*.md` | The actual procedures (SPEC-first, agent parity, commit). One copy, tool-neutral. | every tool, people |
+| `docs/workflows/*.md` | The actual procedures (SPEC-first, agent parity, commit). One copy, tool-neutral. The agent parity workflow also holds the rules index (scope, workflow, trigger per rule), rendered from the shipped rules; add rows for your own rules. | every tool, people |
 | `docs/agent-sdd/FORMAT.md` | Shapes of `SPEC.md`, `AGENTS.md`, and the session change log. | every tool, people |
 | `.claude/rules/*.md` | Claude Code path rules: when a file under `src/`, `apps/`, or `packages/` is edited, Claude reads the matching workflow first. Thin: one link each. One rule has no path (`finishing-branch-commit-order`): it loads for every task and makes the AI commit logged work before finishing a branch. | Claude Code |
-| `.claude/rules/INDEX.md` | Index of the rules: scope, workflow, trigger per rule, plus naming and editing conventions. Generated from the shipped rules; add rows for your own rules. | Claude Code, people |
 | `.cursor/rules/*.mdc` | Same rules for Cursor, generated from `.claude/rules` by `scripts/gen-cursor-rules.mjs`. Never edit by hand. | Cursor |
 | `.agents/skills/*/` | Codex and Cursor skills: thin adapters plus `agents/openai.yaml` display metadata. | Codex, Cursor |
 | `.claude/skills/commit-changes/` | Claude Code skill for the commit workflow. | Claude Code |
@@ -162,17 +161,18 @@ Options for `plan` and `apply`:
 |---|---|
 | `--profiles core,sdd,config,helm` or `full` | File sets to install. `core` and `sdd` are always included. Default: `core,sdd`, or whatever `.agent-sdd/config.json` already says. |
 | `--agents all` or `claude,codex,cursor` | Tools to configure. Default: all three. |
-| `--merge-agents` | Append the managed block to an existing `AGENTS.md` and the `@AGENTS.md` import to an existing `CLAUDE.md`. Read both files first. |
+| `--merge-agents` | Append the `@./docs/workflows/SPEC-FIRST-WORKFLOW.md` line to an existing `AGENTS.md` and the `@AGENTS.md` import to an existing `CLAUDE.md` when they lack it. Read both files first. |
 | `--replace <path>[,<path>]` | Write the tool version of these tool-owned files even if you edited them or they existed before install. They become tool-owned: upgrades update them, `uninstall` deletes them. |
 | `--allow-dirty` | Apply with uncommitted changes present. Not recommended: you lose the clean one-diff review. |
 | `--write` | Actually write. Without it, `apply` is a dry run. |
 | `--json` | Machine-readable output. |
 
-Plan action words: `create` new file; `preserve` already correct; `update` managed block refreshed;
-`update-generated` tool-owned file upgraded (hash matched); `keep` left alone and skipped by this upgrade, either
-a tool-owned file you edited or a file that already existed with the tool's content before the first apply;
-`merge` your file kept, tool entries added; `conflict` file exists and the tool does not own it, nothing is
-written.
+Plan action words: `create` new file; `preserve` already correct; `update` tool-owned part of your file refreshed
+(an old `AGENTS.md` block swapped for the import line); `update-generated` tool-owned file upgraded (hash
+matched); `keep` left alone and skipped by this upgrade, either a tool-owned file you edited or a file that already
+existed with the tool's content before the first apply; `merge` your file kept, tool entries added; `delete` an
+unedited file an older version generated and this one no longer ships; `conflict` file exists and the tool does
+not own it, nothing is written.
 
 Files from an earlier apply that your current `--profiles` no longer include stay on disk and stay tracked.
 The plan lists them; `uninstall` removes them, or delete them by hand.
@@ -236,17 +236,23 @@ Every message ends with what to do. The most frequent ones:
 | `missing AGENTS.md: <folder>` (from `check-docs`) | An app or package folder has no `AGENTS.md`. | Write one: purpose, commands, module SPEC table. |
 | `missing SPEC.md: <folder>` (from `check-docs`) | A module folder under `moduleRoots` has no `SPEC.md`. | Write it per `docs/agent-sdd/FORMAT.md` and link it from the app `AGENTS.md`, in the same commit. |
 | `AGENTS.md no longer imports the working rules` (from `check-docs`) | The `@./docs/workflows/SPEC-FIRST-WORKFLOW.md` line was removed. | Put the line back on its own line; without it the rules never reach Claude Code. |
-| `AGENTS.md: the text between the ... markers was edited` (from `plan`) | You wrote inside the managed block. | Upgrades keep your version. Move your text outside the markers, then `apply --write --replace AGENTS.md`. |
+| `AGENTS.md: the old cross-agent-sdd block was edited after install` (from `plan`) | You wrote inside the block an older version managed. | Upgrades keep your version. Move your text outside the markers, then `apply --write --replace AGENTS.md`: the block becomes the import line. |
+| `.claude/rules/INDEX.md: no longer shipped, and it is yours` (from `plan`) | You added rows to the old rules index. It loads in every Claude Code session. | Move your rows to the Rules index in `docs/workflows/AGENT-PARITY-WORKFLOW.md`, then delete the file. |
 | `managed file changed outside installer` (from `verify`) | A tool-owned file was hand-edited. | Keep the edit: `apply` then lists the file as `keep` and skips it on every upgrade, so you own it from now on. Or take the tool version back, see [Taking the tool version back](#taking-the-tool-version-back). Prefer `.agent-sdd/config.json` (`exclude`, `runtimeRoots`, `configGroups`) over editing the gate script, so upgrades keep working. |
 
 ### Upgrading a repository set up by an older version
 
 Run `plan .` first. Files you never touched show `update-generated` and get the new text. Files you edited show
 `keep` and stay yours. A file the new version ships that your repository already wrote by hand (for example
-`scripts/check-docs.mjs`, `.claude/rules/INDEX.md`, `.claude/rules/finishing-branch-commit-order.md`) shows
-`conflict`: compare the two, then either move yours aside or adopt the tool version with
-`apply . --write --replace <path>`. `verify` then runs both gates; a new `moduleRoots` key appears in
-`.agent-sdd/config.json` (empty when the layout was not detected; fill it in).
+`scripts/check-docs.mjs`, `.claude/rules/finishing-branch-commit-order.md`) shows `conflict`: compare the two, then
+either move yours aside or adopt the tool version with `apply . --write --replace <path>`. `verify` then runs both
+gates; a new `moduleRoots` key appears in `.agent-sdd/config.json` (empty when the layout was not detected; fill
+it in).
+
+From 0.4.0 to 0.5.0: the managed `AGENTS.md` block becomes the single import line (`update`), and an unedited
+`.claude/rules/INDEX.md` is removed (`delete`); its table moved into `docs/workflows/AGENT-PARITY-WORKFLOW.md`.
+Both changes cut text that Claude Code loaded in every session. A repository that already removed the block by
+hand and kept the import line shows `preserve`.
 
 ### Taking the tool version back
 

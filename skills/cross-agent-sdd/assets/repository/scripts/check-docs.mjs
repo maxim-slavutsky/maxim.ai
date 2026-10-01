@@ -137,7 +137,7 @@ function checkImport() {
   if (!(config?.profiles ?? []).includes('sdd')) return;
   const rootAgents = join(ROOT, 'AGENTS.md');
   if (!existsSync(rootAgents)) {
-    fail('missing AGENTS.md at the repository root. Run the cross-agent-sdd "apply --write" command to recreate the managed block.');
+    fail(`missing AGENTS.md at the repository root. Create it with the line @./${SPEC_DOC} so the working rules reach every agent.`);
     return;
   }
   if (!WORKFLOW_IMPORT.test(readFileSync(rootAgents, 'utf8'))) {

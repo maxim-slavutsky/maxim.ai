@@ -23,7 +23,7 @@ List here the documents that exist today, so a reader knows what to expect and w
 |---|---|
 | format convention | [FORMAT.md](../agent-sdd/FORMAT.md) |
 | repository root | [AGENTS.md](../../AGENTS.md) |
-| project rules | [.claude/rules/INDEX.md](../../.claude/rules/INDEX.md) |
+| project rules | [rules index](AGENT-PARITY-WORKFLOW.md#rules-index) |
 | canonical workflows | this folder |
 
 Add one row per app, package, and shared config folder as their documents are written.
@@ -37,10 +37,12 @@ Add one row per app, package, and shared config folder as their documents are wr
 2. **Minimise raw reads.** When the spec answers the question (contracts, invariants, data flow, pitfalls), do not
    spelunk the implementation unless verifying a specific line. Trust the spec. Spec wrong: fix the spec.
 3. **Diverged, update.** A behavior change that contradicts an invariant, an interface line, or a recorded pitfall
-   updates the SPEC in the same change set.
+   updates the SPEC in the same change set. A bug against an existing invariant adds regression evidence and a bugs
+   row with (or before) the fix.
 4. **Missing, create.** Non-trivial work in a module without a SPEC creates one, shaped per FORMAT.md: goal,
-   constraints, interfaces, invariants, tasks, bugs, files. Establish ownership and intended invariants; do not
-   reverse-engineer requirements from implementation guesses.
+   constraints, interfaces, invariants, files. Add a tasks or bugs section only with its first row: an empty ledger
+   fails the gate. Establish ownership and intended invariants; do not reverse-engineer requirements from
+   implementation guesses.
 5. **Cross-spec consistency.** A change that touches several modules walks every affected `SPEC.md` and confirms
    cross-references and invariant citations still hold.
 6. **The gate is partial.** Two gates run in pre-commit and CI. `scripts/check-docs.mjs` enforces rule 4 (the
@@ -64,6 +66,9 @@ Add one row per app, package, and shared config folder as their documents are wr
    critical to look thorough: the gate turns it red.
 10. **Commit contract, evidence, implementation, and adapters together.** Remove completed task rows from live
     specs; keep the durable outcome as an invariant or a bug row.
+11. **Current state only.** Documents describe the code as it is now: no dates outside the bugs table, no "was X
+    until", no measurements that only justify a past change, no verification logs, no done-task ledgers. A rule
+    keeps a one-line why. A settled decision keeps its rejected options in one line each. History lives in Git.
 
 ## Workflow shortcut
 

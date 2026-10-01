@@ -41,8 +41,7 @@ or missing: proceed directly. Claude Code carries this as a standing rule:
 **Why:** this is the repository's only commit path. The log drives the message, tests and builds run before anything
 is staged, charts validate when touched, only logged files are staged, and the gate trailers from step 5 are
 composed here. Bypassing it leaves the log entries in place, so the next commit message repeats them, and the
-unlisted-files guard never runs. Real incident: a sub-agent flow called the finish-branch skill straight after its
-own commit and skipped the commit workflow.
+unlisted-files guard never runs.
 
 ## Workflow
 
@@ -83,10 +82,10 @@ Run **one** invocation through the repository's cached task runner (turbo, nx, o
 task and filter, `lint` included, and errors-only output, for example:
 
 ```bash
-pnpm turbo run test build lint --filter=<workspace> --filter=<workspace> --output-logs=errors-only 2>&1 | tail -60
+pnpm turbo run test build lint --filter=<workspace> --filter=<workspace> --concurrency=2 --output-logs=errors-only 2>&1 | tail -60
 ```
 
-Set the tool timeout to **600 s**: a cold run of several apps takes minutes. Three parts of that line are
+Set the tool timeout to **600 s**: a cold run of several apps takes minutes. Four parts of that line are
 load-bearing:
 
 - The task runner, never `pnpm --filter <pkg> test` directly: the direct form bypasses the cache and re-runs the
@@ -96,6 +95,10 @@ load-bearing:
   hook then hits the cache.
 - Errors-only output: a passing task prints nothing, so the summary line is the whole output; a failing task prints
   its full log. Never re-run to see output; never redirect to a file.
+- A concurrency cap (`--concurrency=<n>`, sized to the machine; 2 fits a laptop). Task runners default high (turbo:
+  10), so every test suite, build, and lint of every filtered workspace starts at once, the machine is
+  oversubscribed, and test suites hit their timeouts. A test runner's own worker cap (`--maxWorkers=50%`) lives in
+  the package scripts and is the second limit; keep both.
 
 Also:
 
@@ -173,7 +176,7 @@ Compose a Conventional Commits message from the log. Terse, exact, why over what
   ```
 
 Write the message to a file in your scratch directory, then validate it **before** committing (seconds instead of
-a failed hook run; the pre-commit lint runs before commit-msg, so a bad trailer used to cost a full lint):
+a failed hook run; the pre-commit lint runs before commit-msg, so a bad trailer found by the hook costs a full lint):
 
 ```bash
 <commit linter> --edit <scratch>/commit-msg.txt && node scripts/check-sdd.mjs --staged --commit-msg <scratch>/commit-msg.txt

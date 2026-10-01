@@ -29,8 +29,8 @@ contracts w/o rejecting their documented valid formats.
 V1: Tasks & Bugs ledgers read from heading → next level-two heading | absolute EOF; blank lines & table
 header/separator rows before `T<n>|...` | `B<n>|...` data valid.
 V2: ∀ `.claude/rules/<n>.md` (≠ `INDEX.md`) → `.cursor/rules/<n>.mdc` = `scripts/gen-cursor-rules.mjs` output.
-Stale | missing | stray `.mdc` → gate fail. ⊥ hand-edit `.mdc`. `INDEX.md` excluded everywhere: generator, adapter
-link check **& the per-commit partner check** — it is the human index, ⊥ a rule ∴ ⊥ mirror, ⊥ `Agent-Parity` trailer.
+Stale | missing | stray `.mdc` → gate fail. ⊥ hand-edit `.mdc`. Legacy `INDEX.md` (≤ 0.4.0 rules index) excluded
+everywhere: generator, adapter link check **& the per-commit partner check**; ⊥ a rule ∴ ⊥ mirror, ⊥ `Agent-Parity`.
 V3: `--changed` base = first of `--base`, `SDD_BASE_REF`, `origin/<CHANGE_TARGET>` | `<CHANGE_TARGET>`,
 `GIT_PREVIOUS_COMMIT`, `GIT_PREVIOUS_SUCCESSFUL_COMMIT`, `HEAD^`. Explicit source (`--base`, `SDD_BASE_REF`,
 `CHANGE_TARGET`) unresolvable → fail; ⊥ silent fallback to `HEAD^`.
@@ -66,29 +66,12 @@ V11: `scripts/check-docs.mjs` (core) fails on: workspace (dir w/ package manifes
 either red → verify red. `moduleRoots` detected once (`<runtimeRoot>/*/src/modules` when ∃), then config-owned.
 V12: both gates skip `.claude/worktrees/` prefix always (⊥ via config): Claude Code worktree = full repo copy
 inside checkout ∴ duplicate SPEC ids & dangling links from another branch.
-V13: managed `AGENTS.md` block hash ≠ manifest record → plan `keep` w/ reason, apply proceeds for rest; ⊥ silent
-overwrite of text inside markers. `apply --write --replace AGENTS.md` → `update`, new block written.
-V14: `.claude/rules/INDEX.md` generated @ apply from shipped `.claude/rules/*.md` (rule | scope globs | workflow
-link | description); recorded `generated`; ⊥ `.mdc` mirror, ⊥ `.agents` twin, ⊥ parity partner. Repository-owned
-after edit (V7 `keep`).
-
-## Bugs
-
-id|date|cause|fix
----|---|---|---
-B1|2026-09-19|ledger capture used `$` w/ multiline mode ∴ end-of-line after heading = end-of-section ∴ valid tables read empty|V1 parser slices to next heading | EOF; test covers named & §-prefixed headings
-B2|2026-09-19|static `.cursor/rules/*.mdc` assets; gate checked mirror existence only ∴ one-sided Claude rule edit passed green|V2 generator + `--check` in gate
-B3|2026-09-19|`--changed` used bare `CHANGE_TARGET`; Jenkins PR checkout has only `origin/<target>` ∴ "cannot inspect commits"|V3 resolution order
-B4|2026-09-19|no waiver path ∴ first gate-tightening commit already on shared branch keeps every later `--changed` run red|V4
-B5|2026-09-19|uninstall filtered whole PostToolUse entry ∴ user command beside reminder deleted, file too when `created`|V6 strip inner hooks only
-B6|2026-09-19|pre-existing file identical to template recorded `generated` w/o mode ∴ uninstall deleted user file|V7 `preserved`
-B7|2026-09-19|project-scope skill install: bundled `assets/` docs, own SPEC, own SKILL.md scanned as policy ∴ 33 gate errors|V9
-B8|2026-09-19|hook config partner group included changed file ∴ matcher-only change passed staged gate|V8
-B9|2026-09-19|re-apply w/ fewer profiles rebuilt manifest from plan only ∴ optional-profile files lost ownership, uninstall missed them|V7
-B10|2026-09-19|edited generated file = `conflict` ∴ whole apply blocked; message & README promised skip|V7 `keep`
-B11|2026-09-20|`partnerGroups` paired `.claude/rules/INDEX.md` w/ `.cursor/rules/INDEX.mdc` ∴ every commit touching the index needed an `Agent-Parity` trailer (generator + adapter check already skipped it)|V2 partner check skips `INDEX`
-B12|2026-09-23|trailer regex read 1 line; commitlint caps 100 chars ∴ 60-file commit bounced 3× between 2 gates (healthchecker_mono)|V10 fold
-B13|2026-09-21|Claude Code worktrees nested in `.claude/worktrees` ∴ every SPEC read twice → `duplicate SPEC id` ∀ module, both hooks blocked ∀ commit while any worktree existed (healthchecker_mono)|V12
-B14|2026-09-25|gate checked link reachability only ∴ new app | module w/o `AGENTS.md` | `SPEC.md` passed green; healthchecker_mono hand-wrote `check-docs.mjs`|V11
-B15|2026-09-25|`agentsContent` replaced managed block unconditionally ∴ upgrade silently dropped a section hand-inserted inside markers (healthchecker_mono `## Adding an app or package`)|V13
-B16|2026-09-25|no rule index shipped ∴ ∀ repo hand-wrote `.claude/rules/INDEX.md` (scope, workflow, trigger per rule)|V14
+V13: root `AGENTS.md`: tool owns 1 line `@./docs/workflows/SPEC-FIRST-WORKFLOW.md` (record `managed-line`); rest =
+repository's; ⊥ restated rules. Missing file → create header + line. File w/ line anywhere → `preserve`. File w/o line
+→ conflict unless `--merge-agents` (append). Legacy 0.4.0 block (markers): hash = record → `update` to line; hash ≠
+record → `keep` w/ reason; `--replace AGENTS.md` → line. `verify` ⊥ checks AGENTS.md beyond check-docs import line.
+Uninstall removes line | legacy block, keeps rest.
+V14: rules index = table (rule | scope globs | workflow | description) in `docs/workflows/AGENT-PARITY-WORKFLOW.md`,
+rendered @ apply from shipped `.claude/rules/*.md` of selected profiles. ⊥ `.claude/rules/INDEX.md` generated: rule
+file w/o `paths` loads ∀ Claude Code session. Legacy `INDEX.md` recorded `generated`: hash = record → plan `delete`;
+edited → `keep` w/ reason, record kept. Gates still skip legacy `INDEX.md` (V2).

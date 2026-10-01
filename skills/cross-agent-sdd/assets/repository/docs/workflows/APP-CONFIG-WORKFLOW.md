@@ -56,8 +56,7 @@ One table per config shape, `file | role`. Fill it once the repository is known:
 A strict validator cuts both ways: a JSON key the schema lacks fails the boot, and a schema field no JSON sets
 fails only for the environment that missed it. The e2e fixture is forgotten first: it boots its own module, so a
 schema change without it fails every e2e spec at load, not at assertion. The chart copy is forgotten next, and that
-one fails in the cluster while local tests stay green. Record the real incidents here as they happen; they are what
-make the rule credible.
+one fails in the cluster while local tests stay green.
 
 ## How to apply
 
@@ -66,11 +65,31 @@ make the rule credible.
 - Optional block with defaults: the JSON copies may omit it, but the validator default must exist or the block reads
   `undefined` at runtime.
 - A value the chart supplies stays inside a string in the chart JSON template: a bare template expression as a JSON
-  number breaks parsing and the drift test.
-- A browser config that arrives at deploy time from sources outside the repository: CI renders placeholders only.
-  Note in the change log that the external source needs the new value.
+  number breaks parsing and the drift test. One exception: a whole object rendered with `{{ ... | toJson }}`, which
+  the drift test stubs as `{}` before parsing.
 - After: run the config tests (the shipped-config spec validates every tracked JSON against the schema) and
   `helm template` when the chart moved.
+
+## Browser runtime config
+
+A single-page app that reads a global (`window.CONFIG`) from a script that `index.html` loads before the bundle has
+no build-time check of that shape: a field the reader expects and the file lacks is `undefined` in the browser,
+after deploy. One shape, five surfaces:
+
+| Surface | Role |
+|---|---|
+| served config script (`public/config/config.js`) | values for a local run and for the bare image |
+| global type declaration (`global.d.ts`) | types the reader; says nothing about the file |
+| config reader module | the only place that reads the global |
+| test setup default | the global in every test; a field missing here is `undefined` in every spec |
+| chart template and values placeholders | cluster source of the script; the values arrive at deploy time |
+
+- Field added: every surface in one change; then render the chart and read the generated script.
+- Field renamed: grep the global and the field name; the single reader shows a stale name.
+- Deploy-time value: CI renders placeholders only. Note in the change log that the external source needs the value.
+- The served script reaches the browser: never put a secret in it.
+
+## What the gate checks
 
 The generic gate checks configured JSON paths and textual key coverage. Computed configuration may require a
 repository-specific parser or test; green generic coverage does not prove value semantics. When the chart copy is a
