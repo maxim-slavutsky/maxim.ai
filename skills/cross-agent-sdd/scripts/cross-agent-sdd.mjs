@@ -20,7 +20,7 @@ import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseRule, toMdc } from '../assets/repository/scripts/gen-cursor-rules.mjs';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const SKILL_NAME = 'cross-agent-sdd';
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSET_ROOT = join(SKILL_ROOT, 'assets', 'repository');
@@ -34,6 +34,10 @@ const MANIFEST = '.agent-toolchain.json';
 const CONFIG = '.agent-sdd/config.json';
 const WAIVERS = '.agent-sdd/waivers.json';
 const INSTALL_MARKER = '.cross-agent-sdd-install.json';
+// The one tool-owned line of the root AGENTS.md: it keeps the SPEC-first rules in Claude Code's context.
+const AGENTS_IMPORT = '@./docs/workflows/SPEC-FIRST-WORKFLOW.md';
+const AGENTS_IMPORT_LINE = /^@(?:\.\/)?docs\/workflows\/SPEC-FIRST-WORKFLOW\.md[ \t]*\r?$/m;
+// Up to 0.4.0 the tool owned a block between these markers; upgrades swap an unedited block for the import line.
 const AGENTS_START = '<!-- cross-agent-sdd:start -->';
 const AGENTS_END = '<!-- cross-agent-sdd:end -->';
 const AGENTS_DEFAULT_HEADER = '# Repository agent instructions';
@@ -89,9 +93,9 @@ Commands
                                   the plan and writes nothing.
   verify <repo> [--json]          Check that every generated file is intact, then run both repository gates
                                   (scripts/check-docs.mjs, scripts/check-sdd.mjs). Changes nothing.
-  uninstall <repo> --write        Remove everything "apply" added: delete tool-owned files, take the managed
-                                  block out of AGENTS.md, the import out of CLAUDE.md, the hook entries out
-                                  of the settings files. Your own files stay. Asks you to type "uninstall"
+  uninstall <repo> --write        Remove everything "apply" added: delete tool-owned files, take the import
+                                  line out of AGENTS.md and CLAUDE.md, the hook entries out of the settings
+                                  files. Your own files stay. Asks you to type "uninstall"
                                   before deleting; without --write it only lists what would go.
   install-skill [options] --write Copy this skill into your home folder (or one repository) so your AI tools
                                   can find it. Without --write it only shows the target folders.
@@ -102,8 +106,8 @@ Options for plan, apply, and uninstall
                                     "config" adds a runtime-config propagation gate; "helm" adds Helm chart
                                     validation. "full" means all four. (plan, apply)
   --agents all | claude,codex,cursor   Which AI tools to configure. Default: all three. (plan, apply)
-  --merge-agents                    When AGENTS.md or CLAUDE.md already exists, append the managed block or the
-                                    @AGENTS.md import instead of stopping. Read those files first. (plan, apply)
+  --merge-agents                    When AGENTS.md or CLAUDE.md already exists without its import line, append
+                                    the line instead of stopping. Read those files first. (plan, apply)
   --replace <path>[,<path>]         Write the tool version of these tool-owned files even if you edited them or
                                     they existed before install. They become tool-owned: upgrades update them
                                     and uninstall deletes them. (plan, apply)
@@ -299,53 +303,37 @@ function detectModuleRoots(root, runtimeRoots) {
   return out;
 }
 
-const RULES_INDEX = '.claude/rules/INDEX.md';
+const PARITY_WORKFLOW = 'docs/workflows/AGENT-PARITY-WORKFLOW.md';
+const RULES_INDEX_SLOT = '<!-- rules-index -->';
 
-/** Human index of the shipped Claude rules. Not a rule itself: no Cursor mirror, no parity partner. */
-function rulesIndexContent(rules) {
-  const rows = rules.map(([path, body]) => {
-    const name = basename(path);
-    const rule = parseRule(body);
-    const workflow = body.match(/\[([^\]]+)\]\((\.\.\/\.\.\/docs\/workflows\/[^)#]+\.md)(#[^)]*)?\)/);
-    const workflowCell = workflow ? `[${basename(workflow[2], '.md')}](${workflow[2]}${workflow[3] ?? ''})` : '-';
-    const scope = rule?.paths?.length ? rule.paths.map((glob) => `\`${glob}\``).join(', ') : '(no glob: loads for every task)';
-    const trigger = (rule?.description ?? '').replace(/\|/g, '\\|');
-    return `| [${name}](${name}) | ${scope} | ${workflowCell} | ${trigger} |`;
-  });
-  return `# Project rules
-
-Thin Claude Code adapters. Each rule is frontmatter (\`description\`, \`type\`, optional \`paths\` globs) plus one
-link to its canonical workflow under [docs/workflows/](../../docs/workflows/AGENT-PARITY-WORKFLOW.md). The body
-of the rule, the **why** and the **how to apply**, lives in that workflow, never here.
-
-Claude Code loads a rule when a file matching its \`paths\` glob is touched; a rule without \`paths\` loads for
-every task. Cursor gets the generated \`.cursor/rules/<name>.mdc\`; Codex gets \`.agents/skills/<name>\`.
-
-## Naming
-
-- kebab-case \`.md\` only (no underscores, no spaces).
-- The file name describes the **scope** of the rule, not the incident that produced it.
-- The same \`<name>\` in every harness: \`.claude/rules/<name>.md\`, \`.agents/skills/<name>/\`,
-  \`.cursor/rules/<name>.mdc\`.
-
-## Contents
-
-| Rule | Scope | Workflow | Trigger |
-|---|---|---|---|
-${rows.join('\n')}
-
-## Editing
-
-- Every workflow keeps its **Why** and **How to apply** sections. The why is what lets a future reader judge an
-  edge case the rule does not name; a rule stripped to its assertion gets deleted the first time it is inconvenient.
-- The why cites the **real** incident. A rule justified by an invented example cannot be checked, so it cannot be
-  maintained.
-- A rule body carries no tool-specific tokens (\`Skill("...")\`, "Claude-specific"): \`scripts/gen-cursor-rules.mjs\`
-  refuses them, because the Cursor mirror copies the body verbatim.
-- Add, remove, or rename a rule: update this index, the \`.agents/skills/<name>\` adapter, the workflow's adapter
-  list, and run \`node scripts/gen-cursor-rules.mjs\`, all in the same change. The gate checks the links both ways.
-`;
+/**
+ * Rows of the rules index in AGENT-PARITY-WORKFLOW.md: one per shipped Claude rule (name, scope, workflow, trigger),
+ * so the table always matches the selected profiles. It lives in a workflow, not in .claude/rules: a rule file
+ * without "paths" loads in every Claude Code session.
+ */
+function rulesIndexRows(rules) {
+  return rules
+    .map(([path, body]) => {
+      const name = basename(path, '.md');
+      const rule = parseRule(body);
+      const workflow = body.match(/\]\(\.\.\/\.\.\/docs\/workflows\/([^)#]+\.md)(#[^)]*)?\)/);
+      const workflowCell = !workflow
+        ? '-'
+        : `docs/workflows/${workflow[1]}` === PARITY_WORKFLOW
+          ? 'this file'
+          : `[${basename(workflow[1], '.md')}](${workflow[1]}${workflow[2] ?? ''})`;
+      const scope = rule?.paths?.length ? rule.paths.map((glob) => `\`${glob}\``).join(', ') : 'no glob: loads every session';
+      const trigger = (rule?.description ?? '').replace(/\|/g, '\\|');
+      return `| [\`${name}\`](../../.claude/rules/${name}.md) | ${scope} | ${workflowCell} | ${trigger} |`;
+    })
+    .join('\n');
 }
+
+// Files an earlier version generated and this one no longer ships. Unedited: deleted on upgrade. Edited: kept.
+const RETIRED_FILES = {
+  '.claude/rules/INDEX.md':
+    'a rule file without "paths" loads in every Claude Code session; the rules table now lives in the Rules index of docs/workflows/AGENT-PARITY-WORKFLOW.md',
+};
 
 function existingConfig(root) {
   const path = join(root, CONFIG);
@@ -375,12 +363,14 @@ function desiredFiles(root, profiles, agents) {
   const rules = [];
   for (const [path, content] of [...output]) {
     const match = path.match(/^\.claude\/rules\/([^/]+\.md)$/);
-    if (!match || match[1] === 'INDEX.md') continue;
+    if (!match) continue;
     rules.push([path, content]);
     const mirror = toMdc(match[1], content);
     output.set(`.cursor/rules/${mirror.file}`, mirror.content);
   }
-  if (rules.length) output.set(RULES_INDEX, rulesIndexContent(rules));
+  if (output.has(PARITY_WORKFLOW)) {
+    output.set(PARITY_WORKFLOW, output.get(PARITY_WORKFLOW).replace(RULES_INDEX_SLOT, rulesIndexRows(rules)));
+  }
 
   const current = existingConfig(root);
   const runtimeRoots = current?.runtimeRoots ?? detectRuntimeRoots(root);
@@ -496,33 +486,36 @@ function hookContent(root, agent) {
   return `${JSON.stringify(mergeHookConfig(agent, current), null, 2)}\n`;
 }
 
+/**
+ * The root AGENTS.md carries one tool-owned line, the SPEC-first import; the rest of the file is the repository's.
+ * The workflow it imports holds every rule, so nothing is restated here.
+ */
 function agentsContent(root, allowMerge, record = null) {
-  const fragment = read(join(ASSET_ROOT, 'AGENTS.fragment.md')).trim();
   const path = join(root, 'AGENTS.md');
-  if (!existsSync(path)) return { action: 'create', content: `${AGENTS_DEFAULT_HEADER}\n\n${fragment}\n` };
+  if (!existsSync(path)) return { action: 'create', content: `${AGENTS_DEFAULT_HEADER}\n\n${AGENTS_IMPORT}\n` };
   const current = read(path);
-  const replaced = replaceBlock(current, fragment, AGENTS_START, AGENTS_END);
-  if (replaced !== null) {
-    if (replaced === current) return { action: 'preserve', content: current };
-    // Text between the markers was edited after install: an upgrade would silently drop that text.
-    const block = managedBlock(current, AGENTS_START, AGENTS_END);
-    if (record?.kind === 'managed-block' && sha(block ?? '') !== record.sha256) {
+  const block = managedBlock(current, AGENTS_START, AGENTS_END);
+  if (block !== null) {
+    // An edited 0.4.0 block holds the team's text: swapping it for the import line would silently drop that text.
+    if (record?.kind === 'managed-block' && sha(block) !== record.sha256) {
       return {
         action: 'keep',
         content: null,
-        reason: `the text between the ${AGENTS_START} markers was edited after install, so this upgrade keeps your version. Move repository-specific text outside the markers, then run "apply <repo> --write --replace AGENTS.md" to take the new block.`,
+        reason: `the old cross-agent-sdd block was edited after install, so this upgrade keeps it. This version replaces the block with the single line ${AGENTS_IMPORT}, because the block repeated the workflow that line imports. Move your text outside the markers, then run "apply <repo> --write --replace AGENTS.md".`,
       };
     }
-    return { action: 'update', content: replaced };
+    const replacement = AGENTS_IMPORT_LINE.test(current.replace(block, '')) ? '' : AGENTS_IMPORT;
+    return { action: 'update', content: current.replace(block, replacement) };
   }
+  if (AGENTS_IMPORT_LINE.test(current)) return { action: 'preserve', content: current };
   if (!allowMerge) {
     return {
       action: 'conflict',
       content: null,
-      reason: 'this file already exists and has no cross-agent-sdd block. Read it, then re-run with --merge-agents to append the block at the end; your text stays as is.',
+      reason: `this file already exists and does not import the SPEC-first workflow. Read it, then re-run with --merge-agents to append the line ${AGENTS_IMPORT} at the end; your text stays as is.`,
     };
   }
-  return { action: 'merge', content: `${current.trimEnd()}\n\n${fragment}\n` };
+  return { action: 'merge', content: `${current.trimEnd()}\n\n${AGENTS_IMPORT}\n` };
 }
 
 function claudeContent(root, allowMerge, enabled) {
@@ -565,7 +558,7 @@ function plan(root, profiles, agents, allowMerge = false, replace = []) {
   const desiredPaths = new Set([...desired].map(([path]) => path));
   const replaced = new Set(replace);
   for (const path of replaced) {
-    if (path === 'AGENTS.md') continue; // takes the new managed block even when the old one was edited
+    if (path === 'AGENTS.md') continue; // swaps an edited 0.4.0 block for the import line
     if (!desiredPaths.has(path) || path === CONFIG) {
       throw new Error(`--replace ${path}: not a file this tool generates for the selected profiles. Run "plan <repo>" to see the tool-owned files.`);
     }
@@ -636,6 +629,21 @@ function plan(root, profiles, agents, allowMerge = false, replace = []) {
     const absolute = join(root, path);
     const action = !existsSync(absolute) ? 'create' : read(absolute) === content ? 'preserve' : 'merge';
     actions.push({ path, action, content });
+  }
+  for (const [path, why] of Object.entries(RETIRED_FILES)) {
+    const record = manifest?.managedFiles?.[path];
+    const absolute = join(root, path);
+    if (record?.kind !== 'generated' || !existsSync(absolute)) continue;
+    if (record.mode !== 'preserved' && sha(read(absolute)) === record.sha256) {
+      actions.push({ path, action: 'delete', content: null, reason: `no longer shipped: ${why}.` });
+    } else {
+      actions.push({
+        path,
+        action: 'keep',
+        content: null,
+        reason: `no longer shipped, and it is yours (edited after install or present before it), so it stays: ${why}. Move your rows there, then delete this file.`,
+      });
+    }
   }
   // Files from an earlier apply that the selected profiles no longer ship stay tracked while they exist.
   const planned = new Set(actions.map((action) => action.path));
@@ -714,14 +722,20 @@ function printPlan(value, asJson) {
     console.log(`  ${action.action.padEnd(17)} ${action.path}${action.replaced ? '   (--replace: tool version written, now tool-owned)' : ''}`);
   }
   console.log(
-    '\nAction words: create = new file; preserve = already correct, left alone; update = managed block refreshed; ' +
-      'update-generated = tool-owned file upgraded; keep = tool-owned file you edited, left alone, upgrade skipped; ' +
-      'merge = your file kept, tool entries added; conflict = file exists and this tool does not own it, so nothing is written.',
+    '\nAction words: create = new file; preserve = already correct, left alone; update = tool-owned part of your ' +
+      'file refreshed; update-generated = tool-owned file upgraded; keep = tool-owned file you edited, left alone, ' +
+      'upgrade skipped; merge = your file kept, tool entries added; delete = unedited file an older version generated ' +
+      'and this one no longer ships; conflict = file exists and this tool does not own it, so nothing is written.',
   );
   const kept = value.actions.filter((action) => action.action === 'keep');
   if (kept.length) {
     console.log('\nKept as they are (edited by you after install):');
     for (const action of kept) console.log(`  - ${action.path}: ${action.reason}`);
+  }
+  const deleted = value.actions.filter((action) => action.action === 'delete');
+  if (deleted.length) {
+    console.log('\nRemoved (unedited, and this version no longer ships them):');
+    for (const action of deleted) console.log(`  - ${action.path}: ${action.reason}`);
   }
   if (value.orphans?.length) {
     console.log(
@@ -757,7 +771,8 @@ function applyPlan(value) {
       if (action.action === 'preserve' || action.action === 'keep') continue;
       const path = safePath(value.root, join(value.root, action.path));
       const before = existsSync(path) ? read(path) : null;
-      atomicWrite(path, action.content);
+      if (action.action === 'delete') unlinkSync(path);
+      else atomicWrite(path, action.content);
       rollback.push({ path, before });
     }
 
@@ -772,8 +787,7 @@ function applyPlan(value) {
         continue;
       }
       if (action.path === 'AGENTS.md') {
-        const block = managedBlock(read(path), AGENTS_START, AGENTS_END);
-        managedFiles[action.path] = { kind: 'managed-block', mode: installMode(action.action, previous), sha256: sha(block ?? '') };
+        managedFiles[action.path] = { kind: 'managed-line', mode: installMode(action.action, previous) };
       } else if (action.path === '.gitignore' || action.path === 'CLAUDE.md') {
         managedFiles[action.path] = { kind: 'merged', mode: installMode(action.action, previous) };
       } else if (Object.values(hookConfigs).includes(action.path)) {
@@ -861,15 +875,14 @@ function uninstallPlan(root, force) {
       push(path, 'keep', { reason: 'existed with this content before install; not ours to change' });
       continue;
     }
-    if (record.kind === 'managed-block') {
+    if (path === 'AGENTS.md') {
+      // A 0.4.0 block the upgrade kept (edited) goes whole; otherwise only the import line is ours.
       const block = managedBlock(current, AGENTS_START, AGENTS_END);
-      if (!block) {
-        push(path, 'keep', { reason: 'the cross-agent-sdd block is no longer there; nothing to remove' });
-        continue;
-      }
-      const rest = trimmedOrEmpty(current.replace(block, ''));
-      if (mode === 'created' && (!rest || rest.trim() === AGENTS_DEFAULT_HEADER)) push(path, 'delete', { reason: 'created by install, only the managed block inside' });
-      else push(path, 'edit', { content: rest, reason: 'remove the cross-agent-sdd block, keep the rest' });
+      const what = block ? 'the cross-agent-sdd block' : 'the SPEC-first import line';
+      const rest = trimmedOrEmpty(block ? current.replace(block, '') : withoutLine(current, AGENTS_IMPORT));
+      if (rest === trimmedOrEmpty(current)) push(path, 'keep', { reason: `${what} is no longer there; nothing to remove` });
+      else if (mode === 'created' && (!rest || rest.trim() === AGENTS_DEFAULT_HEADER)) push(path, 'delete', { reason: `created by install, only ${what} inside` });
+      else push(path, 'edit', { content: rest, reason: `remove ${what}, keep the rest` });
       continue;
     }
     if (path === 'CLAUDE.md') {
@@ -978,12 +991,7 @@ function verify(root) {
         `managed file changed outside installer: ${path}. If the edit is intended, keep it: upgrades skip this file (plan shows "keep"). ${restoreAdvice(path)}`,
       );
     }
-    if (record.kind === 'managed-block') {
-      const block = managedBlock(read(absolute), AGENTS_START, AGENTS_END);
-      if (!block || sha(block) !== record.sha256) {
-        errors.push(`managed AGENTS block changed: ${path}. The text between the cross-agent-sdd markers was edited or removed. Put repository-specific policy outside the markers and run "apply --write" to restore the block.`);
-      }
-    }
+    // AGENTS.md is the repository's apart from the import line, and check-docs below asserts that line.
   }
   for (const agent of manifest.agents ?? []) {
     const path = hookConfigs[agent];

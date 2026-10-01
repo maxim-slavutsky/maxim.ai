@@ -594,7 +594,7 @@ function impactProblems(changedFiles, message, label, waived = new Set()) {
     if ((match = path.match(/^\.agents\/skills\/([^/]+)\/SKILL\.md$/))) {
       return [[`.claude/skills/${match[1]}/`, `.claude/rules/${match[1]}.md`]];
     }
-    // INDEX.md is the human index of the rules, not a rule: gen-cursor-rules skips it, so it has no mirror.
+    // A legacy INDEX.md (rules index up to 0.4.0) is not a rule: gen-cursor-rules skips it, so it has no mirror.
     if ((match = path.match(/^\.claude\/rules\/([^/]+)\.md$/))) return match[1] === 'INDEX' ? [] : [[`.cursor/rules/${match[1]}.mdc`]];
     if ((match = path.match(/^\.cursor\/rules\/([^/]+)\.mdc$/))) return [[`.claude/rules/${match[1]}.md`]];
     // Hook configs move together: each other enabled tool's config must change in the same commit. The

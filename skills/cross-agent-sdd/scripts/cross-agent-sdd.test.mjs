@@ -85,6 +85,39 @@ function runtimeCommit(root, name, message) {
 }
 
 const NO_IMPACT = 'exports a fixture constant without observable runtime behavior';
+const SPEC_IMPORT = '@./docs/workflows/SPEC-FIRST-WORKFLOW.md';
+const sha256 = (text) => createHash('sha256').update(text).digest('hex');
+
+/** A repository as cross-agent-sdd 0.4.0 left it: a managed AGENTS.md block and a generated rules index. */
+function legacyInstalled({ editBlock = false, editIndex = false } = {}) {
+  const root = installed();
+  const block = [
+    '<!-- cross-agent-sdd:start -->',
+    '## Specification-driven development',
+    '',
+    'Reading order before maintained-code edits: nearest SPEC.md first.',
+    '',
+    SPEC_IMPORT,
+    '<!-- cross-agent-sdd:end -->',
+  ].join('\n');
+  const index = '# Project rules\n\n| Rule | Scope |\n|---|---|\n| [spec-first.md](spec-first.md) | `src/**` |\n';
+  writeFileSync(join(root, 'AGENTS.md'), `# Repository agent instructions\n\n## Team notes\n\nDeploy through make deploy.\n\n${block}\n`, 'utf8');
+  writeFileSync(join(root, '.claude', 'rules', 'INDEX.md'), index, 'utf8');
+  const manifestPath = join(root, '.agent-toolchain.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  manifest.generator.version = '0.4.0';
+  manifest.managedFiles['AGENTS.md'] = { kind: 'managed-block', mode: 'created', sha256: sha256(block) };
+  manifest.managedFiles['.claude/rules/INDEX.md'] = { kind: 'generated', mode: 'created', sha256: sha256(index) };
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  if (editBlock) {
+    const agentsPath = join(root, 'AGENTS.md');
+    writeFileSync(agentsPath, readFileSync(agentsPath, 'utf8').replace('<!-- cross-agent-sdd:end -->', '## Local\n\nKeep me.\n<!-- cross-agent-sdd:end -->'), 'utf8');
+  }
+  if (editIndex) writeFileSync(join(root, '.claude', 'rules', 'INDEX.md'), `${index}| [team.md](spec-first.md) | \`lib/**\` |\n`, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'chore: state left by cross-agent-sdd 0.4.0']);
+  return root;
+}
 
 test('skill metadata is discoverable and matches its directory', () => {
   const body = readFileSync(join(SKILL_ROOT, 'SKILL.md'), 'utf8');
@@ -219,7 +252,7 @@ test('ledger parser reads header rows through next heading or EOF [@spec cross-a
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('existing AGENTS.md requires explicit managed-block merge', () => {
+test('existing AGENTS.md requires an explicit merge before the import line is appended', () => {
   const root = fixture();
   writeFileSync(join(root, 'AGENTS.md'), '# Existing policy\n', 'utf8');
   git(root, ['add', 'AGENTS.md']);
@@ -238,8 +271,7 @@ test('existing AGENTS.md requires explicit managed-block merge', () => {
   const merged = run(['apply', root, '--write', '--merge-agents']);
   assert.equal(merged.status, 0, merged.stderr);
   const body = readFileSync(join(root, 'AGENTS.md'), 'utf8');
-  assert.match(body, /# Existing policy/);
-  assert.match(body, /<!-- cross-agent-sdd:start -->/);
+  assert.equal(body, `# Existing policy\n\n${SPEC_IMPORT}\n`);
 });
 
 test('project install writes owned skill copies without a Cursor duplicate', () => {
@@ -994,48 +1026,133 @@ test('both gates skip Claude Code worktrees nested inside the checkout [@spec cr
   assert.equal(docs.status, 0, docs.stderr);
 });
 
-test('an edited managed AGENTS block is kept by upgrades until --replace AGENTS.md [@spec cross-agent-sdd.gates:V13]', () => {
+test('AGENTS.md gets only the SPEC-first import line, never a managed block [@spec cross-agent-sdd.gates:V13]', () => {
   const root = installed();
   const agentsPath = join(root, 'AGENTS.md');
-  const edited = readFileSync(agentsPath, 'utf8').replace(
-    '<!-- cross-agent-sdd:end -->',
-    '## Team notes\n\nDeploy through make deploy.\n<!-- cross-agent-sdd:end -->',
-  );
-  writeFileSync(agentsPath, edited, 'utf8');
+  assert.equal(readFileSync(agentsPath, 'utf8'), `# Repository agent instructions\n\n${SPEC_IMPORT}\n`);
+  const manifest = JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8'));
+  assert.equal(manifest.managedFiles['AGENTS.md'].kind, 'managed-line');
+
+  // The repository owns the rest of the file; the line may sit anywhere in it.
+  writeFileSync(agentsPath, `# Team map\n\n| Doc | Role |\n|---|---|\n| [README](README.md) | onboarding |\n\n${SPEC_IMPORT}\n\n## Notes\n\nDeploy through make deploy.\n`, 'utf8');
   git(root, ['add', 'AGENTS.md']);
-  git(root, ['commit', '-q', '-m', 'docs: notes inside the managed block']);
-
-  const planned = run(['plan', root]);
-  assert.equal(planned.status, 0, planned.stderr);
-  assert.match(planned.stdout, /keep\s+AGENTS\.md/);
-  assert.match(planned.stdout, /AGENTS\.md: the text between the [^\n]*edited after install/);
-  assert.match(planned.stdout, /No conflicts\. Apply can run\./);
-
-  const applied = run(['apply', root, '--write']);
-  assert.equal(applied.status, 0, applied.stderr);
-  assert.match(readFileSync(agentsPath, 'utf8'), /Deploy through make deploy/);
-
-  const replaced = run(['apply', root, '--write', '--replace', 'AGENTS.md', '--allow-dirty']);
-  assert.equal(replaced.status, 0, replaced.stderr);
-  assert.match(replaced.stdout, /update\s+AGENTS\.md/);
-  assert.doesNotMatch(readFileSync(agentsPath, 'utf8'), /Deploy through make deploy/);
-  const verified = run(['verify', root]);
+  git(root, ['commit', '-q', '-m', 'docs: team doc map around the import']);
+  let verified = run(['verify', root]);
   assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`);
+  const planned = run(['plan', root]);
+  assert.match(planned.stdout, /preserve\s+AGENTS\.md/);
+
+  // An AGENTS.md that already imports the workflow needs no --merge-agents.
+  const other = fixture();
+  const own = `# Team\n\nDoc map.\n\n${SPEC_IMPORT}\n\nMore.\n`;
+  writeFileSync(join(other, 'AGENTS.md'), own, 'utf8');
+  git(other, ['add', 'AGENTS.md']);
+  git(other, ['commit', '-q', '-m', 'docs: own agent policy']);
+  const applied = run(['apply', other, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(readFileSync(join(other, 'AGENTS.md'), 'utf8'), own);
+
+  // Without the line, the working rules leave the context: verify fails through check-docs.
+  writeFileSync(agentsPath, '# Team map\n', 'utf8');
+  verified = run(['verify', root]);
+  assert.notEqual(verified.status, 0);
+  assert.match(verified.stderr, /no longer imports the working rules/);
 });
 
-test('the rules index is generated from the shipped rules and stays out of parity checks [@spec cross-agent-sdd.gates:V14]', () => {
-  const root = installed();
-  const index = readFileSync(join(root, '.claude', 'rules', 'INDEX.md'), 'utf8');
-  for (const name of readdirSync(join(root, '.claude', 'rules'))) {
-    if (name === 'INDEX.md') continue;
-    const escaped = name.replace('.', '\\.');
-    assert.match(index, new RegExp(`\\[${escaped}\\]\\(${escaped}\\)`), `${name} listed`);
-  }
-  assert.match(index, /finishing-branch-commit-order\.md[^\n]*no glob: loads for every task/);
-  assert.equal(existsSync(join(root, '.cursor', 'rules', 'INDEX.mdc')), false);
-  assert.ok(existsSync(join(root, '.cursor', 'rules', 'finishing-branch-commit-order.mdc')));
+test('upgrade turns an unedited 0.4.0 AGENTS block into the import line and keeps an edited one until --replace [@spec cross-agent-sdd.gates:V13]', () => {
+  const root = legacyInstalled();
+  const agentsPath = join(root, 'AGENTS.md');
+  const planned = run(['plan', root]);
+  assert.equal(planned.status, 0, planned.stderr);
+  assert.match(planned.stdout, /update\s+AGENTS\.md/);
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  let body = readFileSync(agentsPath, 'utf8');
+  assert.match(body, /Deploy through make deploy/);
+  assert.doesNotMatch(body, /cross-agent-sdd:start|Reading order/);
+  assert.equal(body.split('\n').filter((line) => line === SPEC_IMPORT).length, 1);
   const manifest = JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8'));
-  assert.equal(manifest.managedFiles['.claude/rules/INDEX.md'].kind, 'generated');
-  const checked = gate(root);
+  assert.equal(manifest.managedFiles['AGENTS.md'].kind, 'managed-line');
+  let verified = run(['verify', root]);
+  assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`);
+
+  const edited = legacyInstalled({ editBlock: true });
+  const editedPath = join(edited, 'AGENTS.md');
+  const kept = run(['plan', edited]);
+  assert.match(kept.stdout, /keep\s+AGENTS\.md/);
+  assert.match(kept.stdout, /AGENTS\.md: the old cross-agent-sdd block was edited after install/);
+  assert.match(kept.stdout, /No conflicts\. Apply can run\./);
+  assert.equal(run(['apply', edited, '--write']).status, 0);
+  assert.match(readFileSync(editedPath, 'utf8'), /Keep me\./);
+  verified = run(['verify', edited]);
+  assert.equal(verified.status, 0, `an edited legacy block is not a verify error: ${verified.stdout}\n${verified.stderr}`);
+
+  const replaced = run(['apply', edited, '--write', '--replace', 'AGENTS.md', '--allow-dirty']);
+  assert.equal(replaced.status, 0, replaced.stderr);
+  assert.match(replaced.stdout, /update\s+AGENTS\.md/);
+  body = readFileSync(editedPath, 'utf8');
+  assert.doesNotMatch(body, /Keep me\.|cross-agent-sdd:start/);
+  assert.match(body, /Deploy through make deploy/);
+  assert.equal(body.split('\n').filter((line) => line === SPEC_IMPORT).length, 1);
+});
+
+test('verify accepts a 0.4.0 AGENTS block removed by hand while the import line stays [@spec cross-agent-sdd.gates:V13]', () => {
+  const root = legacyInstalled();
+  const agentsPath = join(root, 'AGENTS.md');
+  writeFileSync(agentsPath, `# Repository agent instructions\n\n## Doc map\n\nRules: ${SPEC_IMPORT.slice(1)}\n\n${SPEC_IMPORT}\n`, 'utf8');
+  git(root, ['add', 'AGENTS.md']);
+  git(root, ['commit', '-q', '-m', 'docs: drop the duplicated SDD block']);
+  const verified = run(['verify', root]);
+  assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`);
+  const planned = run(['plan', root]);
+  assert.match(planned.stdout, /preserve\s+AGENTS\.md/);
+});
+
+test('the rules index is a table in AGENT-PARITY-WORKFLOW.md rendered from the shipped rules; no INDEX.md [@spec cross-agent-sdd.gates:V14]', () => {
+  const root = fixture();
+  const applied = run(['apply', root, '--write', '--profiles', 'core,sdd,config']);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(existsSync(join(root, '.claude', 'rules', 'INDEX.md')), false);
+  const parity = readFileSync(join(root, 'docs', 'workflows', 'AGENT-PARITY-WORKFLOW.md'), 'utf8');
+  const rules = readdirSync(join(root, '.claude', 'rules'));
+  assert.deepEqual(rules.sort(), ['agent-parity.md', 'app-config-updates.md', 'finishing-branch-commit-order.md', 'spec-first.md']);
+  for (const name of rules) {
+    assert.match(parity, new RegExp(`^\\| \\[\`${name.replace('.md', '')}\`\\]\\(\\.\\./\\.\\./\\.claude/rules/${name.replace('.', '\\.')}\\) \\|`, 'm'), `${name} listed`);
+  }
+  assert.match(parity, /finishing-branch-commit-order[^\n]*no glob: loads every session/);
+  assert.match(parity, /`spec-first`[^\n]*\[SPEC-FIRST-WORKFLOW\]\(SPEC-FIRST-WORKFLOW\.md\)/);
+  assert.match(parity, /`agent-parity`[^\n]*\| this file \|/);
+  assert.doesNotMatch(parity, /rules-index/);
+  const manifest = JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8'));
+  assert.equal(manifest.managedFiles['.claude/rules/INDEX.md'], undefined);
+
+  const lean = installed();
+  const leanParity = readFileSync(join(lean, 'docs', 'workflows', 'AGENT-PARITY-WORKFLOW.md'), 'utf8');
+  assert.doesNotMatch(leanParity, /app-config-updates/, 'a rule of an unselected profile has no row');
+  const checked = gate(lean);
   assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('upgrade deletes the unedited 0.4.0 rules index and keeps an edited one [@spec cross-agent-sdd.gates:V14]', () => {
+  const root = legacyInstalled();
+  const index = join(root, '.claude', 'rules', 'INDEX.md');
+  const planned = run(['plan', root]);
+  assert.match(planned.stdout, /delete\s+\.claude\/rules\/INDEX\.md/);
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(existsSync(index), false);
+  let manifest = JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8'));
+  assert.equal(manifest.managedFiles['.claude/rules/INDEX.md'], undefined);
+  const verified = run(['verify', root]);
+  assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`);
+
+  const edited = legacyInstalled({ editIndex: true });
+  const editedIndex = join(edited, '.claude', 'rules', 'INDEX.md');
+  const kept = run(['plan', edited]);
+  assert.match(kept.stdout, /keep\s+\.claude\/rules\/INDEX\.md/);
+  assert.match(kept.stdout, /INDEX\.md: [^\n]*loads in every Claude Code session[^\n]*AGENT-PARITY-WORKFLOW\.md/);
+  assert.equal(run(['apply', edited, '--write']).status, 0);
+  assert.ok(existsSync(editedIndex));
+  manifest = JSON.parse(readFileSync(join(edited, '.agent-toolchain.json'), 'utf8'));
+  assert.equal(manifest.managedFiles['.claude/rules/INDEX.md'].kind, 'generated', 'still tracked, so uninstall sees it');
 });

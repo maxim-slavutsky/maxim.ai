@@ -7,7 +7,7 @@ Which document goes where, what shape each one has, and what the gates check. `S
 
 | Document | Purpose |
 |---|---|
-| root `AGENTS.md` | Repository map + standing policy for every agent. Imports the SPEC-first workflow so the working rules are always in context |
+| root `AGENTS.md` | Repository map + standing policy for every agent. Its line `@./docs/workflows/SPEC-FIRST-WORKFLOW.md` keeps the working rules in context; never restate those rules here |
 | nested `AGENTS.md` | App/package ownership, entry points, commands, environment, pitfalls, module SPEC index |
 | module `SPEC.md` | Intended behavior, interfaces, invariants, evidence, active debt. Caveman encoded |
 | `README.md` | Human onboarding. Never duplicates `AGENTS.md` or `SPEC.md` content |
@@ -15,7 +15,6 @@ Which document goes where, what shape each one has, and what the gates check. `S
 | `CLAUDE.md` | Root `@AGENTS.md` import only; never put content here |
 | `changes-log.md` | Ignored session intent log used during commit preparation; deleted after each commit |
 | `.claude/rules/*.md` | Path-scoped adapter source: frontmatter `paths` + one link to its workflow. Tool-neutral body |
-| `.claude/rules/INDEX.md` | Human index of the rules (scope, workflow, trigger). Not a rule: no mirror, no parity partner |
 | `.claude/skills/<name>/` | Thin adapter for an invocable workflow, user-invocable as `/<name>` |
 | `.cursor/rules/*.mdc` | Generated from `.claude/rules` by `scripts/gen-cursor-rules.mjs`; never hand-edit |
 | `.agents/skills/<name>/` | Codex/Cursor adapter + `agents/openai.yaml` display metadata; same `<name>` as the Claude rule or skill |
@@ -41,7 +40,7 @@ No: AGENTS only.
 
 | Path | Role |
 |---|---|
-| `rules/` | Path-scoped adapters; loaded when a matching path is touched (no `paths`: loaded for every task). A new rule also needs `.agents/skills/<name>`, a regenerated Cursor mirror, and a row in `rules/INDEX.md` |
+| `rules/` | Path-scoped adapters; loaded when a matching path is touched (no `paths`: loaded in every session). Only rules belong here. A new rule also needs `.agents/skills/<name>`, a regenerated Cursor mirror, and a row in the [rules index](../workflows/AGENT-PARITY-WORKFLOW.md#rules-index) |
 | `skills/<name>/SKILL.md` | Thin adapter for an invocable workflow; twin in `.agents/skills/<name>` |
 | `settings.json` | Hooks and enabled plugins, committed, shared by every contributor. The post-edit hook is `scripts/hooks/post-edit-reminder.mjs`, shared with `.codex/hooks.json` and `.cursor/hooks.json`: the three configs move together |
 | `settings.local.json` | Per-machine overrides; never shared |
@@ -71,11 +70,11 @@ Sections, in this order, each optional except the goal:
 | Section | Heading | Content |
 |---|---|---|
 | Goal | `## §G` | One line: what the module exists for |
-| Constraints | `## §C` | Bullets: stack, deployment, compatibility, hard limits, rejected options with dates |
+| Constraints | `## §C` | Bullets: stack, deployment, compatibility, hard limits, rejected options (one line each) |
 | Interfaces | `## §I` | Public surfaces in a fenced block, one line each (grammar below) |
 | Invariants | `## §V` | Numbered conditions that must always hold |
-| Tasks | `## §T` | Active work only, pipe table |
-| Bugs | `## §B` | Durable incident / cause / fix record, pipe table |
+| Tasks | `## §T` | Open work only, pipe table; only once it has a row |
+| Bugs | `## §B` | Bug / cause / fix record, pipe table; only once it has a row |
 | Files | `## §F` | `path \| role` table for the important files |
 
 The long headings `## Goal`, `## Constraints`, `## Interfaces`, `## Invariants`, `## Tasks`, `## Bugs`, `## Files`
@@ -92,32 +91,38 @@ fn:  <name>(<args>) → <return>
 
 ### §V: invariants
 
-Stable identifiers `V1`, `V2`, ... at the start of the line, with the colon **right after the id**. A date or note
-goes after the colon, otherwise the gate does not see the line and no test can cite it. Never renumber or reuse a
-retired id. Ids are unique per file and per split module (a module with one parent SPEC and one SPEC per folder).
+Stable identifiers `V1`, `V2`, ... at the start of the line, with the colon **right after the id**, otherwise the
+gate does not see the line and no test can cite it. Each invariant is one rule plus a one-line why: no dates, no
+change story. Ids are unique per file and per split module (a module with one parent SPEC and one SPEC per folder).
 
 ```text
 V1: ∀ accepted request → response carries correlation id
-V2: (amended 2026-09-17) token expiry ≤ now → reject
+V2: token expiry ≤ now → reject; issuer owns clock skew
+- **V3**: retired.
 ```
 
-Both forms are read: `V1: ...` and `- **V1**: ...`.
+Both forms are read: `V1: ...` and `- **V1**: ...`. Never renumber or reuse an id. A retired invariant keeps its id as
+the one line `- **V<n>**: retired.`, so a reader who sees V2 and V4 does not look for V3. Take a retired id out of
+`critical:` and out of every `@spec` citation in the same change.
 
 ### §T and §B: pipe tables
 
 ```text
 id|status|task|cites
-T1|x|wire swagger at /docs|I.api
+T1|~|wire swagger at /docs|I.api
 T2|.|add pod logs route|V3,I.api
 ```
 
-Status: `x` done, `~` in progress, `.` todo. Remove completed rows from a live spec once the outcome is recorded as an
-invariant or a bug row.
+Status: `~` in progress, `.` todo. A finished task leaves the table in the same change; its outcome becomes an
+invariant or a bugs row. A task table is not a backlog: the issue tracker is.
 
 ```text
 id|date|cause|fix
 B1|2026-08-04|chart probe path ≠ real route|V1
 ```
+
+The bugs table is the one dated record a SPEC keeps. A bug against an existing invariant adds a row with the fix.
+Once the rule of a row lives in a `§V` line, the row may go; the last row takes its heading with it.
 
 Escape a literal `|` as `\|`. A `## §T` or `## §B` heading with no row fails the gate: omit the heading until the
 first row exists.
@@ -218,5 +223,7 @@ Use relative paths in Markdown links. Every module `SPEC.md` is linked from its 
 - Marketing prose ("powerful", "robust", "seamless").
 - Restating what the code already says. Capture intent, contracts, and gotchas, not syntax.
 - Long narrative paragraphs where a table or bullet list would do.
+- History in a live document: dates, "was X until", measurements that only justify a past change, verification logs,
+  done-task rows. Git keeps history; the document keeps the current state.
 - Duplicating information between `AGENTS.md` and `SPEC.md`.
 - Leaving a SPEC stale after the code diverged. The rule is: diverged, update the spec in the same change.

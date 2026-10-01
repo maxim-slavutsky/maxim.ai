@@ -21,10 +21,21 @@ A skipped step is a **blocked** validation, not a pass. Chart validation checks 
 
 ## Delegation (optional, Claude Code only)
 
-- You are already a sub-agent: run everything inline; never nest sub-agents.
+- You are already a sub-agent (dispatched for this, or run inline by another workflow such as the commit workflow):
+  run everything inline; never nest sub-agents. A dispatching prompt with an explicit chart list replaces step 1.
 - Main thread with sub-agents available: resolve the chart list first (a sub-agent cannot ask the user), then spawn
-  one sub-agent with the explicit list and the instruction to run steps 2 and 3 inline. Relay its summary table
-  verbatim.
+  one sub-agent with the explicit list and stop:
+
+  ```text
+  Agent(
+    subagent_type: "general-purpose",
+    model: "sonnet",
+    description: "validate helm charts",
+    prompt: "Validate these Helm charts: <chart paths, one per line>. You ARE the sub-agent: use exactly this list, skip step 1, run steps 2 and 3 of docs/workflows/HELM-VALIDATION-WORKFLOW.md, and return the step 3 summary table as your final message. Do NOT spawn another sub-agent."
+  )
+  ```
+
+  The user does not see the sub-agent's final message: relay its summary table verbatim.
 
 ## Validation flow
 
@@ -76,9 +87,10 @@ $charts = git diff --name-only HEAD | ForEach-Object {
 } | Sort-Object -Unique
 ```
 
-No changed charts: ask the user whether to validate every chart in `helmCharts` instead (Claude Code: a question
-tool with one option per chart, "All charts" first; other harnesses: a plain question). A single chart: skip the
-question.
+No changed charts: ask the user whether to validate every chart in `helmCharts` instead. Claude Code: a multi-select
+question tool. One question holds at most 4 options and one call at most 4 questions, so chunk the list: question 1
+is "All charts" plus the first 3 charts, then 4 charts per question; list any chart beyond 15 in the question text
+for the user to type in. Other harnesses: a plain question. A single chart: skip the question.
 
 ## Step 2: validate charts
 
@@ -150,7 +162,15 @@ Two schema sources; do not confuse them. Core Kubernetes kinds come from `yannh/
 wired in through `-schema-location default` (no download). Custom resources (ServiceMonitor, ExternalSecret, ...)
 come from the `datreeio/CRDs-catalog` repository. When `kubeconform` fails because a CRD schema is absent, fetch it
 once into the committed schema folder (`<group>/<kind-lowercased>_<version>.json`) and commit it with the chart
-change. Do not rely on the network during normal validation. Fallbacks for one run only: extract `openAPIV3Schema`
+change:
+
+```bash
+f='<group>/<kind-lowercased>_<version>.json'
+mkdir -p "<schema folder>/$(dirname "$f")"
+curl -fsSL -o "<schema folder>/$f" "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/$f"
+```
+
+Do not rely on the network during normal validation. Fallbacks for one run only: extract `openAPIV3Schema`
 from the CRD, or pass `-ignore-missing-schemas` and say so in the report.
 
 ## Optional kubeconform install

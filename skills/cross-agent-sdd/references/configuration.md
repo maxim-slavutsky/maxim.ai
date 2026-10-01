@@ -21,14 +21,15 @@ profile only to make the installation look complete.
 | Path-scoped (spec-first, agent-parity, app-config-updates) | `.claude/rules/<name>.md` | `.agents/skills/<name>/SKILL.md` + `agents/openai.yaml`; Cursor also auto-attaches generated `.cursor/rules/<name>.mdc` |
 | Invocable workflow (commit-changes, validate-helm-charts) | `.claude/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` + `agents/openai.yaml` |
 | Ordering guard, no path (finishing-branch-commit-order) | `.claude/rules/<name>.md` without `paths`, loads for every task | generated `.cursor/rules/<name>.mdc`; Codex reads the workflow section it links |
-| Rule index | `.claude/rules/INDEX.md`, generated at apply from the shipped rules | none: not a rule, no mirror, no partner |
+| Rule index | table in `docs/workflows/AGENT-PARITY-WORKFLOW.md` (Rules index), rendered at apply from the shipped rules | same file |
 
-Never create both a rule and a skill for one concern; the gate accepts either as the Claude counterpart. The index is
-generated once; after the repository adds its own rules and edits it, upgrades keep the edited version (`keep`).
+Never create both a rule and a skill for one concern; the gate accepts either as the Claude counterpart. The index
+table is rendered at apply; after the repository adds rows for its own rules, upgrades keep the edited workflow
+(`keep`). It is not a file in `.claude/rules`: a rule file without `paths` loads in every Claude Code session.
 
 Adapter body shape: `description` = the one-line trigger; body = "Adapter, path matching only (<scope>). The rules,
-the why, and the how to apply live in <workflow>." Every workflow keeps **Why** (citing the real incident) and
-**How to apply** sections.
+the why, and the how to apply live in <workflow>." Every workflow keeps **Why** (one line per rule: the reason,
+not the incident history) and **How to apply** sections.
 
 ## Repository configuration
 

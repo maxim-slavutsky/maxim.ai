@@ -23,7 +23,7 @@ hook, and CI integration.
    Existing unowned files are conflicts; never add `--merge-agents`, replace hooks, or weaken a gate merely
    to make application succeed without inspecting the target.
 6. Complete target-specific work the generator cannot infer safely:
-   - merge the managed `AGENTS.md` block when required;
+   - append the `AGENTS.md` import line when required;
    - map actual runtime/config ownership in `.agent-sdd/config.json`: `runtimeRoots`, `moduleRoots` (folders whose
      children are modules that need a `SPEC.md`), `exclude`;
    - wire both gates: `node scripts/check-docs.mjs && node scripts/check-sdd.mjs` in pre-commit,
@@ -80,10 +80,12 @@ cannot undo: Git hook lines, CI steps, and package-manager aliases they added fo
 - `.cursor/rules/*.mdc` are generated from `.claude/rules/*.md`; edit the source and regenerate.
 - Agent hooks remind after edits; Git hooks and CI enforce before integration.
 - Generated files carry ownership metadata in `.agent-toolchain.json`.
-- Upgrade or re-apply replaces a managed file only when its recorded hash still matches. Text edited inside the
-  `AGENTS.md` markers is kept, never overwritten; `--replace AGENTS.md` takes the new block on request.
-- `.claude/rules/INDEX.md` is generated from the shipped rules at apply and then belongs to the repository. It is
-  not a rule: no mirror, no `.agents` twin, no parity partner.
+- Upgrade or re-apply replaces a managed file only when its recorded hash still matches.
+- The tool owns one line of the root `AGENTS.md`: `@./docs/workflows/SPEC-FIRST-WORKFLOW.md`. The rest of the file
+  is the repository's. An unedited 0.4.0 managed block becomes that line on upgrade; an edited one is kept until
+  `--replace AGENTS.md`.
+- The rules index is a table in `docs/workflows/AGENT-PARITY-WORKFLOW.md`, not a file in `.claude/rules`: a rule file
+  without `paths` loads in every Claude Code session. Upgrades delete an unedited 0.4.0 `.claude/rules/INDEX.md`.
 - Both gates skip `.claude/worktrees` (Claude Code worktrees are full repository copies inside the checkout).
 - Trailer reasons may fold over continuation lines that start with a space; the gate joins them.
 - User-owned conflicts stop application. `--force` never authorizes replacement of an unowned directory.
