@@ -38,7 +38,7 @@ try {
   fail(`cannot parse .agent-sdd/config.json: ${error.message}. Fix the JSON syntax.`);
 }
 if (!config) {
-  fail('missing or invalid .agent-sdd/config.json. This file tells the gate where workspaces and modules live; re-run the cross-agent-sdd "apply --write" command to recreate it.');
+  fail('missing or invalid .agent-sdd/config.json. This file tells the gate where workspaces and modules live; re-run the sdd-enforce "apply --write" command to recreate it.');
 }
 
 const skippedNames = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.turbo']);

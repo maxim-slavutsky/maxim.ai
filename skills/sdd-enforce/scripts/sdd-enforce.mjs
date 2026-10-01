@@ -1,27 +1,24 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmdirSync,
-  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseRule, toMdc } from '../assets/repository/scripts/gen-cursor-rules.mjs';
 
-const VERSION = '0.5.0';
-const SKILL_NAME = 'cross-agent-sdd';
+const VERSION = '0.6.0';
+const SKILL_NAME = 'sdd-enforce';
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSET_ROOT = join(SKILL_ROOT, 'assets', 'repository');
 
@@ -33,7 +30,6 @@ function assetSource(targetPath) {
 const MANIFEST = '.agent-toolchain.json';
 const CONFIG = '.agent-sdd/config.json';
 const WAIVERS = '.agent-sdd/waivers.json';
-const INSTALL_MARKER = '.cross-agent-sdd-install.json';
 // The one tool-owned line of the root AGENTS.md: it keeps the SPEC-first rules in Claude Code's context.
 const AGENTS_IMPORT = '@./docs/workflows/SPEC-FIRST-WORKFLOW.md';
 const AGENTS_IMPORT_LINE = /^@(?:\.\/)?docs\/workflows\/SPEC-FIRST-WORKFLOW\.md[ \t]*\r?$/m;
@@ -81,10 +77,10 @@ const entries = [
 ].map(([profile, path]) => ({ profile, path }));
 
 function help() {
-  console.log(`cross-agent-sdd ${VERSION}
+  console.log(`sdd-enforce ${VERSION}
 One spec-driven-development policy for Claude Code, Codex, and Cursor, installed into a Git repository.
 
-Usage: node <path-to-skill>/scripts/cross-agent-sdd.mjs <command> [arguments]
+Usage: node <path-to-skill>/scripts/sdd-enforce.mjs <command> [arguments]
 
 Commands
   audit <repo> [--json]           Look at the repository and report what is already there. Changes nothing.
@@ -97,9 +93,6 @@ Commands
                                   line out of AGENTS.md and CLAUDE.md, the hook entries out of the settings
                                   files. Your own files stay. Asks you to type "uninstall"
                                   before deleting; without --write it only lists what would go.
-  install-skill [options] --write Copy this skill into your home folder (or one repository) so your AI tools
-                                  can find it. Without --write it only shows the target folders.
-  uninstall-skill [options] --write   Remove those copies again (only folders this installer created).
 
 Options for plan, apply, and uninstall
   --profiles core,sdd,config,helm   Which file sets to install. "core,sdd" is the default and always included.
@@ -113,16 +106,9 @@ Options for plan, apply, and uninstall
                                     and uninstall deletes them. (plan, apply)
   --allow-dirty                     Run even if the repository has uncommitted changes. Not recommended.
   --yes                             Skip the typed confirmation. Only for scripts, and only after a person has
-                                    confirmed. (uninstall, uninstall-skill)
+                                    confirmed. (uninstall)
   --force                           uninstall: also delete tool-owned files that were edited after install.
-  --json                            Machine-readable output (plan, audit, verify, install-skill).
-
-Options for install-skill and uninstall-skill
-  --scope user | project            "user" = your home folder (default), "project" = one repository (--repo).
-  --repo <path>                     Repository for --scope project. Default: current folder.
-  --agents all | claude,codex,cursor   Which tools get a copy. Codex and Cursor share ~/.agents/skills.
-  --cursor-cloud                    Also use ~/.cursor/skills (only for Cursor Cloud sync).
-  --force                           install-skill: replace a copy this tool installed earlier (upgrade).
+  --json                            Machine-readable output (plan, audit, verify).
 
 Safety
   Every command that writes or deletes files is a dry run until you add --write.
@@ -222,8 +208,8 @@ function safePath(root, path) {
 
 function atomicWrite(path, content) {
   mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.cross-agent-sdd-${process.pid}-${randomUUID()}.tmp`;
-  const backup = `${path}.cross-agent-sdd-${process.pid}-${randomUUID()}.bak`;
+  const temporary = `${path}.sdd-enforce-${process.pid}-${randomUUID()}.tmp`;
+  const backup = `${path}.sdd-enforce-${process.pid}-${randomUUID()}.bak`;
   writeFileSync(temporary, content, 'utf8');
   if (!existsSync(path)) {
     renameSync(temporary, path);
@@ -846,7 +832,7 @@ function trimmedOrEmpty(body) {
 function uninstallPlan(root, force) {
   const manifest = readManifest(root);
   if (!manifest) {
-    throw new Error(`${MANIFEST} is missing, so there is nothing to uninstall. This repository was never set up by cross-agent-sdd, or the file was deleted; if files remain, remove them by hand.`);
+    throw new Error(`${MANIFEST} is missing, so there is nothing to uninstall. This repository was never set up by sdd-enforce, or the file was deleted; if files remain, remove them by hand.`);
   }
   const actions = [];
   const push = (path, action, extra = {}) => actions.push({ path, action, ...extra });
@@ -938,7 +924,7 @@ function printUninstall(value) {
   const counts = {};
   for (const action of value.actions) counts[action.action] = (counts[action.action] ?? 0) + 1;
   console.log(
-    `\nAction words: delete = file removed; edit = only the cross-agent-sdd part removed, your text stays; ` +
+    `\nAction words: delete = file removed; edit = only the sdd-enforce part removed, your text stays; ` +
       'keep = left untouched for the reason shown; skip = already absent.',
   );
   console.log(`Summary: ${Object.entries(counts).map(([name, count]) => `${count} ${name}`).join(', ')}.`);
@@ -977,12 +963,12 @@ function verify(root) {
   const manifest = readManifest(root);
   const errors = [];
   if (!manifest) {
-    return { ok: false, errors: [`${MANIFEST} is missing. This repository was never set up by cross-agent-sdd (or the file was deleted). Run "apply <repo> --write" first.`] };
+    return { ok: false, errors: [`${MANIFEST} is missing. This repository was never set up by sdd-enforce (or the file was deleted). Run "apply <repo> --write" first.`] };
   }
   for (const [path, record] of Object.entries(manifest.managedFiles ?? {})) {
     const absolute = join(root, path);
     if (!existsSync(absolute)) {
-      errors.push(`managed file is missing: ${path}. It was created by cross-agent-sdd; run "apply <repo> --write" to restore it.`);
+      errors.push(`managed file is missing: ${path}. It was created by sdd-enforce; run "apply <repo> --write" to restore it.`);
       continue;
     }
     // Preserved files existed before install with the tool's content; they are the repository's, not ours.
@@ -1024,99 +1010,6 @@ function verify(root) {
   return { ok: errors.length === 0, errors, gate: gateResult };
 }
 
-function copySkill(target, force) {
-  const parent = dirname(target);
-  mkdirSync(parent, { recursive: true });
-  safePath(parent, target);
-  if (existsSync(target)) {
-    const marker = join(target, INSTALL_MARKER);
-    if (!existsSync(marker)) {
-      throw new Error(`refusing to replace ${target}: that folder was not created by this installer. Move it aside first if you want this skill there.`);
-    }
-    if (!force) throw new Error(`the skill is already installed at ${target}. Add --force to replace it with this version.`);
-  }
-
-  const temporary = join(parent, `.${SKILL_NAME}-${process.pid}-${randomUUID()}.tmp`);
-  const backup = join(parent, `.${SKILL_NAME}-${process.pid}-${randomUUID()}.bak`);
-  cpSync(SKILL_ROOT, temporary, { recursive: true, errorOnExist: true, force: false });
-  writeFileSync(
-    join(temporary, INSTALL_MARKER),
-    `${JSON.stringify({ name: SKILL_NAME, version: VERSION }, null, 2)}\n`,
-    'utf8',
-  );
-  if (!existsSync(target)) {
-    renameSync(temporary, target);
-    return;
-  }
-  renameSync(target, backup);
-  try {
-    renameSync(temporary, target);
-    rmSync(backup, { recursive: true });
-  } catch (error) {
-    if (existsSync(temporary)) rmSync(temporary, { recursive: true });
-    if (existsSync(target)) rmSync(target, { recursive: true });
-    renameSync(backup, target);
-    throw error;
-  }
-}
-
-function skillTargets(parsed) {
-  const scope = flag(parsed, 'scope', 'user');
-  if (!['user', 'project'].includes(scope)) {
-    throw new Error('--scope must be "user" (your home folder, available in every repository) or "project" (one repository, use --repo <path>).');
-  }
-  const agents = listOption('agents', flag(parsed, 'agents', 'all'), ALL_AGENTS, ALL_AGENTS);
-  const base = scope === 'user' ? homedir() : repoRoot(flag(parsed, 'repo', '.'));
-  const targets = [];
-  if (agents.includes('codex') || agents.includes('cursor')) {
-    targets.push({ path: join(base, '.agents', 'skills', SKILL_NAME), tools: 'Codex and Cursor' });
-  }
-  if (agents.includes('claude')) targets.push({ path: join(base, '.claude', 'skills', SKILL_NAME), tools: 'Claude Code' });
-  if (agents.includes('cursor') && flag(parsed, 'cursor-cloud', false)) {
-    targets.push({ path: join(base, '.cursor', 'skills', SKILL_NAME), tools: 'Cursor Cloud sync' });
-  }
-  return { scope, agents, targets };
-}
-
-function installSkill(parsed) {
-  const { scope, agents, targets } = skillTargets(parsed);
-  const output = { scope, agents, targets: targets.map((target) => target.path) };
-  if (!flag(parsed, 'write', false)) return { ...output, dryRun: true, details: targets };
-  for (const target of targets) copySkill(target.path, flag(parsed, 'force', false));
-  return { ...output, dryRun: false, details: targets };
-}
-
-function printInstall(result) {
-  if (result.dryRun) {
-    console.log('install-skill dry run: nothing was copied. It would copy this skill to:');
-  } else {
-    console.log(`Installed cross-agent-sdd ${VERSION} (scope: ${result.scope}) to:`);
-  }
-  for (const target of result.details) console.log(`  ${target.path}   (${target.tools})`);
-  if (result.dryRun) {
-    console.log('Add --write to copy the files.');
-  } else {
-    console.log('Start a new session in your AI tool so it picks up the skill. Then, inside a repository, ask it to bootstrap cross-agent SDD.');
-  }
-}
-
-function uninstallSkillPlan(parsed) {
-  const { scope, targets } = skillTargets(parsed);
-  const actions = targets.map((target) => {
-    if (!existsSync(target.path)) return { ...target, action: 'skip', reason: 'not installed there' };
-    if (!existsSync(join(target.path, INSTALL_MARKER))) return { ...target, action: 'keep', reason: 'folder was not created by this installer; remove it by hand if it is yours' };
-    return { ...target, action: 'delete' };
-  });
-  return { scope, actions };
-}
-
-function printUninstallSkill(value) {
-  console.log(`uninstall-skill (scope: ${value.scope}):`);
-  for (const action of value.actions) {
-    console.log(`  ${action.action.padEnd(8)} ${action.path}   (${action.tools}${action.reason ? `; ${action.reason}` : ''})`);
-  }
-}
-
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   const command = parsed.positional.shift();
@@ -1126,36 +1019,6 @@ async function main() {
   }
   if (command === 'version') {
     console.log(VERSION);
-    return;
-  }
-  if (command === 'install-skill') {
-    const result = installSkill(parsed);
-    if (flag(parsed, 'json', false)) {
-      const { details: _details, ...json } = result;
-      console.log(JSON.stringify(json, null, 2));
-    } else {
-      printInstall(result);
-    }
-    return;
-  }
-  if (command === 'uninstall-skill') {
-    const value = uninstallSkillPlan(parsed);
-    printUninstallSkill(value);
-    const deletions = value.actions.filter((action) => action.action === 'delete');
-    if (!flag(parsed, 'write', false)) {
-      console.log('\nThis was a dry run: nothing was changed. Add --write to remove the folders marked "delete".');
-      return;
-    }
-    if (!deletions.length) {
-      console.log('\nNothing to remove.');
-      return;
-    }
-    if (!(await confirmOrThrow(parsed, 'uninstall', `this deletes ${deletions.length} skill folder(s) listed above`))) {
-      console.log('Cancelled. Nothing was changed.');
-      return;
-    }
-    for (const action of deletions) rmSync(action.path, { recursive: true });
-    console.log(`\nRemoved ${deletions.length} skill folder(s). Repositories set up with the skill keep working; use "uninstall <repo>" to undo those.`);
     return;
   }
 
@@ -1180,7 +1043,7 @@ async function main() {
       return;
     }
     applyUninstall(value);
-    console.log(`\nUninstalled cross-agent-sdd from ${root}. Review the diff with "git status" and commit it.
+    console.log(`\nUninstalled sdd-enforce from ${root}. Review the diff with "git status" and commit it.
 Things this tool cannot undo for you:
   - lines you added to Git hooks (pre-commit, commit-msg) or CI that run scripts/check-docs.mjs or
     scripts/check-sdd.mjs: remove them;
@@ -1208,7 +1071,7 @@ Things this tool cannot undo for you:
       return;
     }
     applyPlan(value);
-    console.log(`\nApplied cross-agent-sdd ${VERSION}. Next steps:
+    console.log(`\nApplied sdd-enforce ${VERSION}. Next steps:
   1. Open .agent-sdd/config.json: make sure "runtimeRoots" lists the folders that hold application code,
      "moduleRoots" lists the folders whose children are modules that need a SPEC.md (for example
      "apps/*/src/modules"), and archived docs (old plans, samples) are in "exclude".
@@ -1232,8 +1095,8 @@ To remove everything later: "uninstall <repo> --write".`);
       for (const error of result.errors) console.error(`x ${error}`);
       console.log(
         result.ok
-          ? 'cross-agent-sdd verify: ok (generated files intact, gate green)'
-          : `cross-agent-sdd verify: failed (${result.errors.length} problem(s) listed above)`,
+          ? 'sdd-enforce verify: ok (generated files intact, gate green)'
+          : `sdd-enforce verify: failed (${result.errors.length} problem(s) listed above)`,
       );
     }
     if (!result.ok) process.exitCode = 1;
@@ -1245,6 +1108,6 @@ To remove everything later: "uninstall <repo> --write".`);
 try {
   await main();
 } catch (error) {
-  console.error(`cross-agent-sdd: ${error.message}`);
+  console.error(`sdd-enforce: ${error.message}`);
   process.exit(1);
 }

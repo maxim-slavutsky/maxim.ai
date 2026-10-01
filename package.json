@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test skills/*/scripts/*.test.mjs"
+    "test": "node --test scripts/*.test.mjs skills/*/scripts/*.test.mjs"
   },
   "engines": {
     "node": ">=22"

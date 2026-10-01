@@ -1,5 +1,5 @@
 ---
-id: cross-agent-sdd.gates
+id: sdd-enforce.gates
 critical:
   - V1
   - V2
@@ -15,9 +15,10 @@ critical:
   - V12
   - V13
   - V14
+  - V15
 ---
 
-# Cross-agent SDD generated gates
+# sdd-enforce generated gates
 
 ## Goal
 
@@ -53,8 +54,8 @@ too). ⊥ procedure w/ intermediate commit lacking the gate file (pre-commit gat
 V8: hook config (`.claude/settings.json` | `.codex/hooks.json` | `.cursor/hooks.json`) changed → ∀ other enabled
 hook config changed in same commit | `Agent-Parity` trailer. Changed file ⊥ own partner. `scripts/hooks/*`
 needs no partner.
-V9: gate ⊥ reads `.claude/skills/cross-agent-sdd/`, `.agents/skills/cross-agent-sdd/`,
-`.cursor/skills/cross-agent-sdd/` (skill installed in-repo = tooling, ≠ policy): no doc links, SPEC ids,
+V9: gate ⊥ reads `.claude/skills/<n>/`, `.agents/skills/<n>/`, `.cursor/skills/<n>/`, n ∈ {`sdd-enforce`,
+`cross-agent-sdd` (former name)} (skill installed in-repo = tooling, ≠ policy): no doc links, SPEC ids,
 adapter shape, parity, or change-impact from those paths.
 V10: `Spec-Impact: none - <reason>` | `Agent-Parity: none - <reason>` reason folds git-trailer style: ∀ following
 line starting w/ whitespace = continuation, joined w/ space; line w/o leading whitespace ends reason. Commit linters
@@ -75,3 +76,5 @@ V14: rules index = table (rule | scope globs | workflow | description) in `docs/
 rendered @ apply from shipped `.claude/rules/*.md` of selected profiles. ⊥ `.claude/rules/INDEX.md` generated: rule
 file w/o `paths` loads ∀ Claude Code session. Legacy `INDEX.md` recorded `generated`: hash = record → plan `delete`;
 edited → `keep` w/ reason, record kept. Gates still skip legacy `INDEX.md` (V2).
+V15: markers keep former skill name: `.gitignore` block `# cross-agent-sdd:start|end` (∀ installs) & legacy
+`AGENTS.md` block `<!-- cross-agent-sdd:start|end -->` (V13) ∴ repos set up before rename upgrade, verify, uninstall.

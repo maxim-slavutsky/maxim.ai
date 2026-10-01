@@ -1,0 +1,16 @@
+{
+  "name": "maxim-ai",
+  "owner": {
+    "name": "Maxim Slavutsky"
+  },
+  "metadata": {
+    "description": "Maxim's AI skills and plugins."
+  },
+  "plugins": [
+    {
+      "name": "maxim-ai",
+      "description": "Maxim's AI skills: sdd-enforce bootstraps one spec-driven-development policy shared by Claude Code, Codex, and Cursor.",
+      "source": "./"
+    }
+  ]
+}

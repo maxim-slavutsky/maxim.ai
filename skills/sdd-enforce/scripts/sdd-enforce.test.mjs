@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 
-const CLI = resolve(dirname(fileURLToPath(import.meta.url)), 'cross-agent-sdd.mjs');
+const CLI = resolve(dirname(fileURLToPath(import.meta.url)), 'sdd-enforce.mjs');
 const SKILL_ROOT = resolve(dirname(CLI), '..');
-const SKILL_NAME = 'cross-agent-sdd';
+const SKILL_NAME = 'sdd-enforce';
 const fixtures = [];
 
 after(() => {
@@ -21,11 +21,11 @@ function git(root, args) {
 }
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'cross-agent-sdd-test-'));
+  const root = mkdtempSync(join(tmpdir(), 'sdd-enforce-test-'));
   fixtures.push(root);
   git(root, ['init', '--initial-branch=main']);
   git(root, ['config', 'user.name', 'Cross Agent SDD Test']);
-  git(root, ['config', 'user.email', 'cross-agent-sdd@example.invalid']);
+  git(root, ['config', 'user.email', 'sdd-enforce@example.invalid']);
   git(root, ['config', 'core.autocrlf', 'false']);
   writeFileSync(join(root, 'README.md'), '# Fixture\n', 'utf8');
   git(root, ['add', 'README.md']);
@@ -195,7 +195,7 @@ test('apply is idempotent, follows rule-vs-skill ownership, and verifies', () =>
   );
 });
 
-test('gate rejects stale Cursor mirror after Claude rule edit [@spec cross-agent-sdd.gates:V2]', () => {
+test('gate rejects stale Cursor mirror after Claude rule edit [@spec sdd-enforce.gates:V2]', () => {
   const root = installed();
   const rule = join(root, '.claude', 'rules', 'spec-first.md');
   writeFileSync(rule, `${readFileSync(rule, 'utf8')}\nAdditional shared policy line.\n`, 'utf8');
@@ -216,7 +216,7 @@ test('gate rejects stale Cursor mirror after Claude rule edit [@spec cross-agent
   assert.match(checked.stderr, /\.cursor\/rules\/stray\.mdc has no source rule/);
 });
 
-test('ledger parser reads header rows through next heading or EOF [@spec cross-agent-sdd.gates:V1]', () => {
+test('ledger parser reads header rows through next heading or EOF [@spec sdd-enforce.gates:V1]', () => {
   const root = installed();
   mkdirSync(join(root, 'src'), { recursive: true });
   const specPath = join(root, 'src', 'SPEC.md');
@@ -272,15 +272,6 @@ test('existing AGENTS.md requires an explicit merge before the import line is ap
   assert.equal(merged.status, 0, merged.stderr);
   const body = readFileSync(join(root, 'AGENTS.md'), 'utf8');
   assert.equal(body, `# Existing policy\n\n${SPEC_IMPORT}\n`);
-});
-
-test('project install writes owned skill copies without a Cursor duplicate', () => {
-  const root = fixture();
-  const result = run(['install-skill', '--scope', 'project', '--repo', root, '--agents', 'all', '--write']);
-  assert.equal(result.status, 0, result.stderr);
-  assert.ok(existsSync(join(root, '.agents', 'skills', SKILL_NAME, 'SKILL.md')));
-  assert.ok(existsSync(join(root, '.claude', 'skills', SKILL_NAME, 'SKILL.md')));
-  assert.equal(existsSync(join(root, '.cursor', 'skills', SKILL_NAME)), false);
 });
 
 test('config profile requires and validates repository-specific surface mapping', () => {
@@ -344,7 +335,7 @@ test('staged runtime edit requires owning contract or concrete no-impact trailer
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('--changed resolves origin/<CHANGE_TARGET> before falling back [@spec cross-agent-sdd.gates:V3]', () => {
+test('--changed resolves origin/<CHANGE_TARGET> before falling back [@spec sdd-enforce.gates:V3]', () => {
   const root = installed();
   git(root, ['update-ref', 'refs/remotes/origin/develop', 'HEAD']);
   git(root, ['checkout', '-q', '-b', 'feature']);
@@ -368,7 +359,7 @@ test('--changed resolves origin/<CHANGE_TARGET> before falling back [@spec cross
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('waivers skip a named commit in --changed mode only [@spec cross-agent-sdd.gates:V4]', () => {
+test('waivers skip a named commit in --changed mode only [@spec sdd-enforce.gates:V4]', () => {
   const root = installed();
   git(root, ['checkout', '-q', '-b', 'feature']);
   const sha = runtimeCommit(root, 'a.js', 'feat: a without trailer');
@@ -405,7 +396,7 @@ test('waivers skip a named commit in --changed mode only [@spec cross-agent-sdd.
   assert.match(checked.stderr, /runtime paths lack owning contract change/);
 });
 
-test('shared skills need Codex metadata and two-way workflow links [@spec cross-agent-sdd.gates:V5]', () => {
+test('shared skills need Codex metadata and two-way workflow links [@spec sdd-enforce.gates:V5]', () => {
   const root = installed();
   rmSync(join(root, '.agents', 'skills', 'commit-changes', 'agents'), { recursive: true });
   let checked = gate(root);
@@ -464,12 +455,6 @@ test('help, dry runs, and the applied summary explain themselves to a newcomer',
   assert.match(applied.stdout, /node scripts\/check-sdd\.mjs/);
   assert.match(applied.stdout, /pre-commit/);
   assert.match(applied.stdout, /old plans, samples[^\n]*"exclude"/);
-
-  const install = run(['install-skill', '--scope', 'project', '--repo', root]);
-  assert.equal(install.status, 0, install.stderr);
-  assert.match(install.stdout, /dry run/i);
-  assert.match(install.stdout, /Add --write/);
-  assert.doesNotMatch(install.stdout, /^\{/);
 });
 
 test('gate messages say what is wrong and how to fix it', () => {
@@ -532,7 +517,7 @@ function preExistingRepo() {
   return root;
 }
 
-test('uninstall is a dry run by default and refuses --write without confirmation [@spec cross-agent-sdd.gates:V6]', () => {
+test('uninstall is a dry run by default and refuses --write without confirmation [@spec sdd-enforce.gates:V6]', () => {
   const root = installed();
   const before = tree(root);
 
@@ -550,7 +535,7 @@ test('uninstall is a dry run by default and refuses --write without confirmation
   assert.deepEqual(tree(root), before);
 });
 
-test('uninstall --write --yes removes only what apply added and restores user files [@spec cross-agent-sdd.gates:V6]', () => {
+test('uninstall --write --yes removes only what apply added and restores user files [@spec sdd-enforce.gates:V6]', () => {
   const root = preExistingRepo();
   const original = tree(root);
   const applied = run(['apply', root, '--write', '--merge-agents']);
@@ -561,7 +546,7 @@ test('uninstall --write --yes removes only what apply added and restores user fi
 
   const removed = run(['uninstall', root, '--write', '--yes']);
   assert.equal(removed.status, 0, `${removed.stdout}\n${removed.stderr}`);
-  assert.match(removed.stdout, /Uninstalled cross-agent-sdd/);
+  assert.match(removed.stdout, /Uninstalled sdd-enforce/);
   assert.match(removed.stdout, /pre-commit/);
 
   const after = tree(root);
@@ -607,29 +592,6 @@ test('uninstall keeps a generated file that was edited unless --force is given',
   assert.equal(existsSync(workflow2), false);
 });
 
-test('uninstall-skill removes only installer-owned copies after confirmation', () => {
-  const root = fixture();
-  const install = run(['install-skill', '--scope', 'project', '--repo', root, '--agents', 'all', '--write']);
-  assert.equal(install.status, 0, install.stderr);
-  mkdirSync(join(root, '.claude', 'skills', 'mine'), { recursive: true });
-  writeFileSync(join(root, '.claude', 'skills', 'mine', 'SKILL.md'), '---\nname: mine\n---\n', 'utf8');
-
-  const dry = run(['uninstall-skill', '--scope', 'project', '--repo', root]);
-  assert.equal(dry.status, 0, dry.stderr);
-  assert.match(dry.stdout, /dry run/i);
-  assert.ok(existsSync(join(root, '.claude', 'skills', SKILL_NAME, 'SKILL.md')));
-
-  const unconfirmed = run(['uninstall-skill', '--scope', 'project', '--repo', root, '--write'], { input: '' });
-  assert.notEqual(unconfirmed.status, 0);
-  assert.match(unconfirmed.stderr, /--yes/);
-
-  const removed = run(['uninstall-skill', '--scope', 'project', '--repo', root, '--write', '--yes']);
-  assert.equal(removed.status, 0, removed.stderr);
-  assert.equal(existsSync(join(root, '.claude', 'skills', SKILL_NAME)), false);
-  assert.equal(existsSync(join(root, '.agents', 'skills', SKILL_NAME)), false);
-  assert.ok(existsSync(join(root, '.claude', 'skills', 'mine', 'SKILL.md')));
-});
-
 test('asset templates never use harness-discoverable directory names', () => {
   const assetRoot = join(SKILL_ROOT, 'assets', 'repository');
   const names = readdirSync(assetRoot);
@@ -638,7 +600,7 @@ test('asset templates never use harness-discoverable directory names', () => {
   assert.ok(existsSync(join(assetRoot, '_agents', 'skills', 'spec-first', 'SKILL.md')));
 });
 
-test('uninstall removes only its own hook command and keeps a user hook beside it [@spec cross-agent-sdd.gates:V6]', () => {
+test('uninstall removes only its own hook command and keeps a user hook beside it [@spec sdd-enforce.gates:V6]', () => {
   const root = installed();
   const path = join(root, '.claude', 'settings.json');
   const settings = JSON.parse(readFileSync(path, 'utf8'));
@@ -658,7 +620,7 @@ test('uninstall removes only its own hook command and keeps a user hook beside i
   assert.deepEqual(commands, ['node scripts/my-lint.mjs']);
 });
 
-test('uninstall keeps a file that existed with template content before install [@spec cross-agent-sdd.gates:V6]', () => {
+test('uninstall keeps a file that existed with template content before install [@spec sdd-enforce.gates:V6]', () => {
   const root = fixture();
   const relPath = 'docs/workflows/SPEC-FIRST-WORKFLOW.md';
   const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', relPath), 'utf8');
@@ -686,19 +648,30 @@ test('uninstall keeps a file that existed with template content before install [
   assert.match(dry2.stdout, /delete\s+docs\/workflows\/SPEC-FIRST-WORKFLOW\.md/);
 });
 
-test('gate ignores the skill installed into the repository by install-skill --scope project [@spec cross-agent-sdd.gates:V9]', () => {
-  const root = fixture();
-  const install = run(['install-skill', '--scope', 'project', '--repo', root, '--agents', 'all', '--write']);
-  assert.equal(install.status, 0, install.stderr);
-  git(root, ['add', '.']);
-  git(root, ['commit', '-m', 'chore: install skill into the repository']);
-  const applied = run(['apply', root, '--write']);
-  assert.equal(applied.status, 0, applied.stderr);
-  const checked = gate(root);
-  assert.equal(checked.status, 0, checked.stderr);
+for (const name of [SKILL_NAME, 'cross-agent-sdd']) {
+  test(`gate ignores a copy of the skill kept in the repository as ${name} [@spec sdd-enforce.gates:V9]`, () => {
+    const root = fixture();
+    for (const harness of ['.claude', '.agents', '.cursor']) {
+      cpSync(SKILL_ROOT, join(root, harness, 'skills', name), { recursive: true });
+    }
+    git(root, ['add', '.']);
+    git(root, ['commit', '-m', 'chore: keep the skill in the repository']);
+    const applied = run(['apply', root, '--write']);
+    assert.equal(applied.status, 0, applied.stderr);
+    const checked = gate(root);
+    assert.equal(checked.status, 0, checked.stderr);
+  });
+}
+
+test('target-repo markers keep the former name so older installs still upgrade [@spec sdd-enforce.gates:V15]', () => {
+  const root = installed();
+  assert.match(readFileSync(join(root, '.gitignore'), 'utf8'), /# cross-agent-sdd:start[\s\S]*# cross-agent-sdd:end/);
+  assert.equal(run(['verify', root]).status, 0);
+  assert.equal(run(['apply', root, '--write']).status, 0);
+  assert.equal(git(root, ['status', '--porcelain']), '');
 });
 
-test('a hook config change needs every other enabled hook config, never itself [@spec cross-agent-sdd.gates:V8]', () => {
+test('a hook config change needs every other enabled hook config, never itself [@spec sdd-enforce.gates:V8]', () => {
   const root = installed();
   const message = join(root, 'msg.txt');
   writeFileSync(message, 'chore: widen matcher\n', 'utf8');
@@ -729,7 +702,7 @@ test('a hook config change needs every other enabled hook config, never itself [
   assert.equal(checked.status, 0, `the hook script alone needs no partner: ${checked.stderr}`);
 });
 
-test('.claude/rules/INDEX.md is not a rule: no .cursor mirror, no Agent-Parity trailer [@spec cross-agent-sdd.gates:V2]', () => {
+test('.claude/rules/INDEX.md is not a rule: no .cursor mirror, no Agent-Parity trailer [@spec sdd-enforce.gates:V2]', () => {
   const root = installed();
   const message = join(root, 'msg.txt');
   writeFileSync(message, 'docs: index the rules\n', 'utf8');
@@ -758,7 +731,7 @@ test('docs tell CI to run the per-commit gate, not only the static one', () => {
   assert.match(readFileSync(join(SKILL_ROOT, 'README.md'), 'utf8'), /static[^\n]*alone[^\n]*--changed|--changed[^\n]*static[^\n]*alone/i);
 });
 
-test('re-apply with fewer profiles keeps ownership of files still on disk [@spec cross-agent-sdd.gates:V7]', () => {
+test('re-apply with fewer profiles keeps ownership of files still on disk [@spec sdd-enforce.gates:V7]', () => {
   const root = fixture();
   const full = run(['apply', root, '--write', '--profiles', 'core,sdd,helm']);
   assert.equal(full.status, 0, full.stderr);
@@ -777,7 +750,7 @@ test('re-apply with fewer profiles keeps ownership of files still on disk [@spec
   assert.match(dry.stdout, /delete\s+docs\/workflows\/HELM-VALIDATION-WORKFLOW\.md/);
 });
 
-test('apply skips a generated file you edited and upgrades the rest [@spec cross-agent-sdd.gates:V7]', () => {
+test('apply skips a generated file you edited and upgrades the rest [@spec sdd-enforce.gates:V7]', () => {
   const root = installed();
   const manifestPath = join(root, '.agent-toolchain.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -814,7 +787,7 @@ test('apply skips a generated file you edited and upgrades the rest [@spec cross
   assert.match(dry.stdout, /keep\s+scripts\/check-sdd\.mjs.*edited/);
 });
 
-test('apply never upgrades a preserved file and verify does not police it [@spec cross-agent-sdd.gates:V7]', () => {
+test('apply never upgrades a preserved file and verify does not police it [@spec sdd-enforce.gates:V7]', () => {
   const root = fixture();
   const relPath = 'docs/workflows/SPEC-FIRST-WORKFLOW.md';
   const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', relPath), 'utf8');
@@ -885,7 +858,7 @@ test('apply --replace takes the tool version back with the documented pre-commit
   assert.match(unknown.stderr, /--replace src\/app\.ts/);
 });
 
-test('a workflow back-link to the Claude rule covers its generated Cursor mirror [@spec cross-agent-sdd.gates:V5]', () => {
+test('a workflow back-link to the Claude rule covers its generated Cursor mirror [@spec sdd-enforce.gates:V5]', () => {
   const root = installed();
   const workflow = join(root, 'docs', 'workflows', 'SPEC-FIRST-WORKFLOW.md');
   const withoutMirrorLink = readFileSync(workflow, 'utf8').replace(/^- \[Cursor rule\]\(\.\.\/\.\.\/\.cursor\/rules\/spec-first\.mdc\)[^\n]*\r?\n/m, '');
@@ -901,7 +874,7 @@ test('a workflow back-link to the Claude rule covers its generated Cursor mirror
   assert.match(checked.stderr, /does not link back to \.claude\/rules\/spec-first\.md/);
 });
 
-test('adopting a preserved file makes it tool-owned, by --replace or by delete and re-apply [@spec cross-agent-sdd.gates:V7]', () => {
+test('adopting a preserved file makes it tool-owned, by --replace or by delete and re-apply [@spec sdd-enforce.gates:V7]', () => {
   const relPath = 'docs/workflows/SPEC-FIRST-WORKFLOW.md';
   const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', relPath), 'utf8');
   const preserved = () => {
@@ -933,7 +906,7 @@ test('adopting a preserved file makes it tool-owned, by --replace or by delete a
   assert.equal(mode(byDelete), 'created');
 });
 
-test('a Spec-Impact reason may fold over continuation lines, like a Git trailer [@spec cross-agent-sdd.gates:V10]', () => {
+test('a Spec-Impact reason may fold over continuation lines, like a Git trailer [@spec sdd-enforce.gates:V10]', () => {
   const root = installed();
   const message = join(root, 'msg.txt');
   mkdirSync(join(root, 'src'), { recursive: true });
@@ -960,7 +933,7 @@ test('a Spec-Impact reason may fold over continuation lines, like a Git trailer 
   assert.match(checked.stderr, /does not name src\/folded\.js/);
 });
 
-test('check-docs demands AGENTS.md per workspace, SPEC.md per module, the SPEC link, and the workflow import [@spec cross-agent-sdd.gates:V11]', () => {
+test('check-docs demands AGENTS.md per workspace, SPEC.md per module, the SPEC link, and the workflow import [@spec sdd-enforce.gates:V11]', () => {
   const root = fixture();
   mkdirSync(join(root, 'apps', 'api', 'src', 'modules', 'auth'), { recursive: true });
   writeFileSync(join(root, 'apps', 'api', 'package.json'), '{ "name": "api" }\n', 'utf8');
@@ -1007,7 +980,7 @@ test('check-docs demands AGENTS.md per workspace, SPEC.md per module, the SPEC l
   assert.match(verified.stderr, /scripts\/check-docs\.mjs\) reported problems/);
 });
 
-test('both gates skip Claude Code worktrees nested inside the checkout [@spec cross-agent-sdd.gates:V12]', () => {
+test('both gates skip Claude Code worktrees nested inside the checkout [@spec sdd-enforce.gates:V12]', () => {
   const root = installed();
   const spec = '---\nid: acme.core\n---\n\n# Core\n\nV1: Fixture holds.\n';
   mkdirSync(join(root, 'src'), { recursive: true });
@@ -1026,7 +999,7 @@ test('both gates skip Claude Code worktrees nested inside the checkout [@spec cr
   assert.equal(docs.status, 0, docs.stderr);
 });
 
-test('AGENTS.md gets only the SPEC-first import line, never a managed block [@spec cross-agent-sdd.gates:V13]', () => {
+test('AGENTS.md gets only the SPEC-first import line, never a managed block [@spec sdd-enforce.gates:V13]', () => {
   const root = installed();
   const agentsPath = join(root, 'AGENTS.md');
   assert.equal(readFileSync(agentsPath, 'utf8'), `# Repository agent instructions\n\n${SPEC_IMPORT}\n`);
@@ -1059,7 +1032,7 @@ test('AGENTS.md gets only the SPEC-first import line, never a managed block [@sp
   assert.match(verified.stderr, /no longer imports the working rules/);
 });
 
-test('upgrade turns an unedited 0.4.0 AGENTS block into the import line and keeps an edited one until --replace [@spec cross-agent-sdd.gates:V13]', () => {
+test('upgrade turns an unedited 0.4.0 AGENTS block into the import line and keeps an edited one until --replace [@spec sdd-enforce.gates:V13]', () => {
   const root = legacyInstalled();
   const agentsPath = join(root, 'AGENTS.md');
   const planned = run(['plan', root]);
@@ -1096,7 +1069,7 @@ test('upgrade turns an unedited 0.4.0 AGENTS block into the import line and keep
   assert.equal(body.split('\n').filter((line) => line === SPEC_IMPORT).length, 1);
 });
 
-test('verify accepts a 0.4.0 AGENTS block removed by hand while the import line stays [@spec cross-agent-sdd.gates:V13]', () => {
+test('verify accepts a 0.4.0 AGENTS block removed by hand while the import line stays [@spec sdd-enforce.gates:V13]', () => {
   const root = legacyInstalled();
   const agentsPath = join(root, 'AGENTS.md');
   writeFileSync(agentsPath, `# Repository agent instructions\n\n## Doc map\n\nRules: ${SPEC_IMPORT.slice(1)}\n\n${SPEC_IMPORT}\n`, 'utf8');
@@ -1108,7 +1081,7 @@ test('verify accepts a 0.4.0 AGENTS block removed by hand while the import line 
   assert.match(planned.stdout, /preserve\s+AGENTS\.md/);
 });
 
-test('the rules index is a table in AGENT-PARITY-WORKFLOW.md rendered from the shipped rules; no INDEX.md [@spec cross-agent-sdd.gates:V14]', () => {
+test('the rules index is a table in AGENT-PARITY-WORKFLOW.md rendered from the shipped rules; no INDEX.md [@spec sdd-enforce.gates:V14]', () => {
   const root = fixture();
   const applied = run(['apply', root, '--write', '--profiles', 'core,sdd,config']);
   assert.equal(applied.status, 0, applied.stderr);
@@ -1133,7 +1106,7 @@ test('the rules index is a table in AGENT-PARITY-WORKFLOW.md rendered from the s
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('upgrade deletes the unedited 0.4.0 rules index and keeps an edited one [@spec cross-agent-sdd.gates:V14]', () => {
+test('upgrade deletes the unedited 0.4.0 rules index and keeps an edited one [@spec sdd-enforce.gates:V14]', () => {
   const root = legacyInstalled();
   const index = join(root, '.claude', 'rules', 'INDEX.md');
   const planned = run(['plan', root]);

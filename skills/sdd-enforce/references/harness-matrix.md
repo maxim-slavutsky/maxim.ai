@@ -23,9 +23,10 @@ Read before creating or editing agent-specific files.
 - Every `.agents/skills/<name>` carries `agents/openai.yaml`.
 - One hook script; all enabled harness configs invoke it. Only the Cursor command passes `--cursor`. The
   three configs move together (a changed config is never its own partner); the script may change alone.
-- The gate skips `.claude/skills/cross-agent-sdd`, `.agents/skills/cross-agent-sdd`, and
-  `.cursor/skills/cross-agent-sdd` (this skill installed in-repo), and `.claude/worktrees` (Claude Code worktrees,
-  full repository copies). Other tool skills installed in-repo go into `exclude` in `.agent-sdd/config.json`.
+- The gate skips `.claude/skills/sdd-enforce`, `.agents/skills/sdd-enforce`, and
+  `.cursor/skills/sdd-enforce` (this skill installed in-repo, also under the former name `cross-agent-sdd`), and
+  `.claude/worktrees` (Claude Code worktrees, full repository copies). Other tool skills installed in-repo go
+  into `exclude` in `.agent-sdd/config.json`.
 - Adding, removing, or renaming a rule updates the Rules index in `docs/workflows/AGENT-PARITY-WORKFLOW.md` in the
   same change. Keep `.claude/rules` for rules only: a file there without `paths` loads in every Claude Code session.
   The gates still skip a legacy `.claude/rules/INDEX.md` (no mirror, no partner) until it is deleted.
