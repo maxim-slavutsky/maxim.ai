@@ -1,4 +1,4 @@
-# cross-agent-sdd
+# sdd-enforce
 
 One spec-driven-development (SDD) policy for a repository, shared by Claude Code, Codex, and Cursor.
 
@@ -22,26 +22,54 @@ Nothing here is specific to one product or company. The generated files contain 
 
 ## Install the skill
 
-A *skill* is a folder with a `SKILL.md` file that an AI coding tool loads on demand. Claude Code looks in
-`~/.claude/skills`, Codex and Cursor look in `~/.agents/skills`. The installer copies this folder there.
+The skill ships in the `maxim-ai` plugin. This GitHub repository is the plugin marketplace: add it once,
+then install the plugin from it. There is nothing to clone. Start a new session afterwards so the tool sees
+the skill.
 
-```bash
-node skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs install-skill --agents all --scope user --write
+**Claude Code.** Inside Claude Code:
+
+```text
+/plugin marketplace add maxim-slavutsky/maxim.ai
+/plugin install maxim-ai@maxim-ai
 ```
 
-Same command works in PowerShell, Command Prompt, Git Bash, and zsh (Node.js 22 or newer). Without `--write`
-it only prints the target folders. Start a new session in your AI tool afterwards so it sees the skill.
+The skill shows as `/maxim-ai:sdd-enforce`. Update with `/plugin marketplace update maxim-ai`, then
+`/plugin update maxim-ai@maxim-ai`.
 
-Options:
+**Codex.** Codex reads the same marketplace file:
 
-| Option | Meaning | Default |
-|---|---|---|
-| `--scope user` | Copy into your home folder, available in every repository | yes |
-| `--scope project --repo <path>` | Copy into one repository only (`.claude/skills`, `.agents/skills`). The gate ignores these copies. Other AI tool skills you keep in-repo go into `exclude` in `.agent-sdd/config.json`. | |
-| `--agents claude,codex,cursor` | Which tools get a copy; Codex and Cursor share one folder | `all` |
-| `--cursor-cloud` | Also copy into `~/.cursor/skills` (only needed for Cursor Cloud sync) | off |
-| `--force` | Replace a copy this installer made earlier (upgrade) | off |
-| `--json` | Machine-readable output | off |
+```bash
+codex plugin marketplace add maxim-slavutsky/maxim.ai
+```
+
+```bash
+codex plugin add maxim-ai@maxim-ai
+```
+
+Or use `/plugins` inside Codex. Update with `codex plugin marketplace upgrade maxim-ai`.
+
+**Cursor.** In the IDE: Customize, then From GitHub Repository, and enter
+`https://github.com/maxim-slavutsky/maxim.ai`. Teams can add the same URL as a team marketplace in the Cursor
+dashboard. From the Cursor CLI:
+
+```bash
+agent plugin marketplace add https://github.com/maxim-slavutsky/maxim.ai
+```
+
+Then install the `maxim-ai` plugin from that marketplace.
+
+The plugin has no version number. Every install and update takes the latest commit on `main`.
+
+**Upgrading from `cross-agent-sdd`.** The skill was renamed from `cross-agent-sdd` to `sdd-enforce` in 0.6.0,
+and the copy-to-home-folder installer was removed. Remove the old copies with the old script, then install the
+plugin as above:
+
+```bash
+node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs uninstall-skill --scope user --agents all --write
+```
+
+Repositories already set up keep working. The `.gitignore` block still uses the `cross-agent-sdd` markers, and
+so does the `AGENTS.md` block that 0.4.0 wrote; `apply`, `verify`, and `uninstall` read them as before.
 
 ## Use it in a repository
 
@@ -53,29 +81,30 @@ also fills in the parts a script cannot guess: which folders hold application co
 
 **Directly from a terminal.** Same result, you drive it:
 
-Run these from the repository root. The script lives where `install-skill` copied it; on Windows Command
-Prompt replace `~` with `%USERPROFILE%`.
+Run these from the repository root. `<skill>` is the folder the plugin installed, the one that holds
+`SKILL.md`. In Claude Code it is under `~/.claude/plugins/cache/maxim-ai/maxim-ai/`; any tool can tell you
+the exact path. On Windows Command Prompt replace `~` with `%USERPROFILE%`.
 
 ```bash
-node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs audit .
+node <skill>/scripts/sdd-enforce.mjs audit .
 ```
 
 Reports what is already in the repository. Changes nothing.
 
 ```bash
-node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs plan .
+node <skill>/scripts/sdd-enforce.mjs plan .
 ```
 
 Lists every file `apply` would create, keep, merge, or refuse. Changes nothing.
 
 ```bash
-node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs apply . --write
+node <skill>/scripts/sdd-enforce.mjs apply . --write
 ```
 
 Writes the files. Without `--write` it prints the plan and writes nothing.
 
 ```bash
-node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs verify .
+node <skill>/scripts/sdd-enforce.mjs verify .
 ```
 
 Checks that every generated file is intact and runs the gate.
@@ -140,10 +169,10 @@ The tool never commits, pushes, or opens pull requests. Review the diff, then co
 ## CLI reference
 
 ```text
-node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs <command> [arguments]
+node <skill>/scripts/sdd-enforce.mjs <command> [arguments]
 ```
 
-Running from a checkout of this repository instead: `node skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs`.
+`<skill>` is the folder the plugin installed; see [Use it in a repository](#use-it-in-a-repository).
 
 | Command | Writes files | Purpose |
 |---|---|---|
@@ -151,7 +180,7 @@ Running from a checkout of this repository instead: `node skills/cross-agent-sdd
 | `plan <repo> [options]` | no | List every file `apply` would create, keep, merge, update, or refuse, with a reason for each conflict. |
 | `apply <repo> [options]` | only with `--write` | Write the planned files atomically. Refuses when the plan has conflicts or the working tree has uncommitted changes. Prints next steps. |
 | `verify <repo> [--json]` | no | Check every tool-owned file against its recorded hash, check hook configs, then run `scripts/check-docs.mjs` and `scripts/check-sdd.mjs`. Exit code 1 on any problem. |
-| `install-skill [options]` | only with `--write` | Copy the skill into your home folder or a repository. |
+| `uninstall <repo> [options]` | only with `--write` | Remove everything `apply` added; see [Uninstall](#uninstall). |
 | `version` | no | Print the version. |
 | `help` | no | Print usage. |
 
@@ -259,7 +288,7 @@ hand and kept the import line shows `preserve`.
 One command, the same for an edit you committed and for a file that existed before install:
 
 ```bash
-node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs apply . --write --replace scripts/check-sdd.mjs
+node <skill>/scripts/sdd-enforce.mjs apply . --write --replace scripts/check-sdd.mjs
 ```
 
 The file gets the tool version and becomes tool-owned: later upgrades update it and `uninstall` deletes it.
@@ -274,13 +303,13 @@ while `scripts/check-sdd.mjs` is missing.
 From a repository:
 
 ```bash
-node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs uninstall .
+node <skill>/scripts/sdd-enforce.mjs uninstall .
 ```
 
 Dry run: lists what would be deleted, edited, or kept. Changes nothing.
 
 ```bash
-node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs uninstall . --write
+node <skill>/scripts/sdd-enforce.mjs uninstall . --write
 ```
 
 Asks you to type `uninstall`, then removes the files.
@@ -291,7 +320,7 @@ What happens:
 |---|---|
 | Files the tool created (workflows, adapters, gate, hooks script, generated Cursor rules) | Deleted, if unchanged since install. Edited copies are kept and reported; add `--force` to delete them too. |
 | Files that already had the same content before install | Kept. The tool never created them, so it never deletes them. |
-| `AGENTS.md`, `CLAUDE.md`, `.gitignore` | Only the cross-agent-sdd block or line is removed; your text stays. A file the tool created and that holds nothing else is deleted. |
+| `AGENTS.md`, `CLAUDE.md`, `.gitignore` | Only the sdd-enforce block or line is removed; your text stays. A file the tool created and that holds nothing else is deleted. |
 | `.claude/settings.json`, `.codex/hooks.json`, `.cursor/hooks.json` | Only the reminder hook entry is removed; your other hooks and settings stay. A file the tool created and that holds nothing else is deleted. |
 | `.agent-sdd/config.json`, `.agent-sdd/waivers.json`, `.agent-toolchain.json` | Deleted (Git history keeps them). |
 | Your `SPEC.md` files, `changes-log.md` | Untouched. |
@@ -303,12 +332,6 @@ Options: `--write` perform; `--yes` skip the typed confirmation (for scripts, on
 Not undone automatically: lines you added to Git hooks, CI, or `package.json` that run `scripts/check-docs.mjs` or `scripts/check-sdd.mjs`.
 The command reminds you at the end.
 
-To remove the skill copies from your machine:
-
-```bash
-node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs uninstall-skill --scope user --agents all --write
-```
-
-Asks you to type `uninstall`, then deletes the copies. Without `--write` it only lists them.
-
-Only folders this installer created are removed; anything else under those paths is left alone.
+To remove the skill from your machine, uninstall the plugin: `/plugin uninstall maxim-ai@maxim-ai` in Claude
+Code, `codex plugin remove maxim-ai@maxim-ai` in Codex, or the plugin settings in Cursor. Repositories set up
+with the skill keep working without it.

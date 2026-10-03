@@ -42,7 +42,7 @@ function json(path) {
 
 const config = existsSync(CONFIG_PATH) ? json(CONFIG_PATH) : null;
 if (!config) {
-  fail('missing or invalid .agent-sdd/config.json. This file tells the gate which folders hold application code; re-run the cross-agent-sdd "apply --write" command to recreate it.');
+  fail('missing or invalid .agent-sdd/config.json. This file tells the gate which folders hold application code; re-run the sdd-enforce "apply --write" command to recreate it.');
 }
 
 const HOOK_CONFIG_PATHS = {
@@ -52,10 +52,13 @@ const HOOK_CONFIG_PATHS = {
 };
 const enabledAgents = new Set(config?.agents?.length ? config.agents : Object.keys(HOOK_CONFIG_PATHS));
 
-// The cross-agent-sdd skill itself may be installed into this repository (install-skill --scope project).
+// A copy of the sdd-enforce skill itself may be kept inside this repository (.claude/.agents/.cursor skills).
 // Its bundled templates, SPEC, and SKILL.md are tooling, not repository policy, so the gate never reads them.
 // Other tool skills installed in-repo go into "exclude" in .agent-sdd/config.json.
-const TOOL_SKILL_DIRS = ['.claude/skills/cross-agent-sdd', '.agents/skills/cross-agent-sdd', '.cursor/skills/cross-agent-sdd'];
+// cross-agent-sdd is the skill's former name; copies installed under it are skipped too.
+const TOOL_SKILL_DIRS = ['.claude', '.agents', '.cursor'].flatMap((root) =>
+  ['sdd-enforce', 'cross-agent-sdd'].map((name) => `${root}/skills/${name}`),
+);
 const skippedNames = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.turbo']);
 // Claude Code keeps its worktrees inside the checkout (.claude/worktrees/<name>), each one a full copy of the
 // repository. Reading them from the main checkout reports every SPEC twice ("duplicate SPEC id") and blocks every
@@ -348,7 +351,7 @@ function checkAgents() {
   for (const agent of agents) {
     const path = hookConfigs[agent];
     if (!path || !existsSync(join(ROOT, path))) {
-      fail(`missing ${agent} hook config: ${path ?? agent}. Re-run the cross-agent-sdd "apply --write" command, or remove "${agent}" from "agents" in .agent-sdd/config.json if that tool is not used here.`);
+      fail(`missing ${agent} hook config: ${path ?? agent}. Re-run the sdd-enforce "apply --write" command, or remove "${agent}" from "agents" in .agent-sdd/config.json if that tool is not used here.`);
       continue;
     }
     const data = json(join(ROOT, path));

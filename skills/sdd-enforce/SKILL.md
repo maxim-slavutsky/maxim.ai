@@ -1,9 +1,9 @@
 ---
-name: cross-agent-sdd
-description: Use when a repository needs one shared spec-driven development policy for Claude Code, Codex, and Cursor at once - missing or drifted agent instructions, rules/skills/hooks that no longer match across harnesses, absent SPEC, docs, or config gates, or installing this skill for every harness on Windows, macOS, or Linux. Not for ordinary feature work inside an already governed repository.
+name: sdd-enforce
+description: Use when a repository needs one shared spec-driven development policy for Claude Code, Codex, and Cursor at once - missing or drifted agent instructions, rules/skills/hooks that no longer match across harnesses, or absent SPEC, docs, or config gates. Not for ordinary feature work inside an already governed repository.
 ---
 
-# Cross-agent SDD bootstrap
+# SDD enforce: cross-agent SDD bootstrap
 
 Create one tool-neutral SDD policy with thin Claude Code, Codex, and Cursor adapters. Use the bundled
 Node CLI for repeatable discovery and file generation; use agent judgment for target-specific ownership,
@@ -41,17 +41,15 @@ hook, and CI integration.
 
 ## CLI
 
-Resolve `scripts/cross-agent-sdd.mjs` relative to this `SKILL.md`; quote its absolute path when the skill
+Resolve `scripts/sdd-enforce.mjs` relative to this `SKILL.md`; quote its absolute path when the skill
 path contains spaces.
 
 ```text
-node <skill>/scripts/cross-agent-sdd.mjs audit <repo> [--json]
-node <skill>/scripts/cross-agent-sdd.mjs plan <repo> [--profiles core,sdd,config,helm] [--agents all]
-node <skill>/scripts/cross-agent-sdd.mjs apply <repo> --write [--merge-agents] [--replace <path,...>] [--allow-dirty]
-node <skill>/scripts/cross-agent-sdd.mjs verify <repo>
-node <skill>/scripts/cross-agent-sdd.mjs uninstall <repo> [--write] [--force] [--yes]
-node <skill>/scripts/cross-agent-sdd.mjs install-skill --scope user|project --agents all --write
-node <skill>/scripts/cross-agent-sdd.mjs uninstall-skill --scope user|project --agents all [--write] [--yes]
+node <skill>/scripts/sdd-enforce.mjs audit <repo> [--json]
+node <skill>/scripts/sdd-enforce.mjs plan <repo> [--profiles core,sdd,config,helm] [--agents all]
+node <skill>/scripts/sdd-enforce.mjs apply <repo> --write [--merge-agents] [--replace <path,...>] [--allow-dirty]
+node <skill>/scripts/sdd-enforce.mjs verify <repo>
+node <skill>/scripts/sdd-enforce.mjs uninstall <repo> [--write] [--force] [--yes]
 ```
 
 Defaults: profiles `core,sdd`; agents `claude,codex,cursor`; dry-run for every mutating command.
@@ -60,7 +58,7 @@ Defaults: profiles `core,sdd`; agents `claude,codex,cursor`; dry-run for every m
 
 When the user asks to remove the governance: run `uninstall <repo>` (dry run), show the user the list of
 files marked delete and edit, and ask for an explicit yes in the conversation. Only after that yes run
-`uninstall <repo> --write --yes`. The same rule applies to `uninstall-skill`. Then tell the user what the tool
+`uninstall <repo> --write --yes`. Then tell the user what the tool
 cannot undo: Git hook lines, CI steps, and package-manager aliases they added for `scripts/check-sdd.mjs`.
 
 ## Red flags under pressure
@@ -90,7 +88,7 @@ cannot undo: Git hook lines, CI steps, and package-manager aliases they added fo
 - Trailer reasons may fold over continuation lines that start with a space; the gate joins them.
 - User-owned conflicts stop application. `--force` never authorizes replacement of an unowned directory.
 - Waivers cover only commits already on a shared branch; `--staged` never reads them.
-- `--yes` on `uninstall` or `uninstall-skill` stands for a confirmation the user gave in this conversation after
+- `--yes` on `uninstall` stands for a confirmation the user gave in this conversation after
   seeing the dry-run list. Never pass it on your own initiative.
 - Green structural gates do not prove intended behavior. Reconcile contract, evidence, and code manually.
 - Never fabricate SPEC invariants or evidence citations from filenames or static guesses.

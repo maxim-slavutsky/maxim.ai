@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "maxim-ai",
+  "description": "Maxim's AI skills and plugins.",
+  "owner": {
+    "name": "Maxim Slavutsky",
+    "url": "https://github.com/maxim-slavutsky"
+  },
+  "plugins": [
+    {
+      "name": "maxim-ai",
+      "description": "Maxim's AI skills: sdd-enforce bootstraps one spec-driven-development policy shared by Claude Code, Codex, and Cursor.",
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}
