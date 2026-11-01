@@ -25,7 +25,7 @@ function editedPaths(input) {
     }
     for (const match of value.matchAll(/^\*\*\* Move to: (.+?)\s*$/gm)) found.add(repoPath(match[1]));
   }
-  return [...found].filter((path) => !path.includes('changes-log'));
+  return [...found];
 }
 
 function main() {
@@ -40,9 +40,9 @@ function main() {
   if (!paths.length) return;
   const context =
     `You edited ${paths.join(', ')}. Before you finish this task: ` +
-    '(1) append an entry to changes-log.md at the repository root (create it if missing) that names the files, ' +
-    'says what changed and why, and ends with "Spec impact: changed" or "Spec impact: none - <concrete reason>"; ' +
-    '(2) if behavior changed, update the SPEC.md that owns these files and the test that proves it; ' +
+    '(1) if behavior, an interface or an invariant changed, update every doc of record whose covers: matches ' +
+    'these files, and the test that cites the invariant with @invariant <id>:V<n>; ' +
+    '(2) if no owner doc changes, plan the commit trailer "Doc-Impact: none - <reason that names each file>"; ' +
     '(3) run "node scripts/check-sdd.mjs" and fix what it reports.';
   process.stdout.write(
     JSON.stringify(

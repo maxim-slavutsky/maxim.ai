@@ -1,10 +1,9 @@
 ---
 name: agent-parity
-description: Keep Claude Code, Codex, and Cursor repository instructions, skills, rules, hooks, and canonical workflows synchronized whenever one harness surface changes.
+description: Use when a change touches the repository instructions, rules, skills or hooks of Claude Code, Codex or Cursor, to keep the partner files of every enabled agent in the same commit.
 ---
 
 # Codex and Cursor adapter
 
-Read [canonical agent parity workflow](../../../docs/workflows/AGENT-PARITY-WORKFLOW.md) completely before changing
-`.claude`, `.codex`, `.cursor`, `.agents`, `scripts/hooks`, or `docs/workflows`. Do not duplicate its partner rules
-here.
+Read [agent parity](../../../docs/agent-parity.md) before you change `.claude`, `.codex`, `.cursor` or
+`.agents`. It holds every partner rule.

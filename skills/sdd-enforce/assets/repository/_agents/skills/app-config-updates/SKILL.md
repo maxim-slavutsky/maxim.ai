@@ -1,10 +1,9 @@
 ---
 name: app-config-updates
-description: Keep runtime application configuration synchronized across local and shipped config, schemas/types, readers, Helm-rendered config, and values placeholders when keys are added, removed, or renamed.
+description: Use when a runtime config key is added, removed or renamed, to update the local and shipped config, the schema and types, the readers, the Helm-rendered config and the values placeholders together. Not for chart settings of the deployment only.
 ---
 
 # Codex and Cursor adapter
 
-Read [canonical application config workflow](../../../docs/workflows/APP-CONFIG-WORKFLOW.md) and the matching group
-in `.agent-sdd/config.json` before changing runtime config shape. Do not apply this workflow to deployment-only chart
-settings.
+Read [application config](../../../docs/app-config.md) and the matching group in `.agent-sdd/config.json`
+before you change the shape of the runtime config.

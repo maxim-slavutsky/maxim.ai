@@ -1,7 +1,7 @@
 interface:
   display_name: "SDD enforce"
   short_description: "Bootstrap shared SDD governance across coding agents"
-  default_prompt: "Use $sdd-enforce to audit this repository and propose a safe cross-agent SDD bootstrap."
+  default_prompt: "Use $sdd-enforce and show its menu to audit, apply, verify, or remove SDD in this repository."
 
 policy:
   allow_implicit_invocation: true

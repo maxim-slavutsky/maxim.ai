@@ -1,32 +1,36 @@
 #!/usr/bin/env node
 /**
- * Generated documentation existence gate.
- *
- * Asserts that the documents a reader is entitled to expect actually exist and are wired in:
+ * Generated documentation gate: the docs a reader expects exist, are linked, and sit where the docs standard
+ * puts them.
  *
  *   - every workspace under a runtime root (a folder with its own package manifest) carries an AGENTS.md;
- *   - every module folder under a configured module root carries a SPEC.md;
- *   - every module SPEC.md is linked from the AGENTS.md that owns it;
- *   - the root AGENTS.md still imports the SPEC-first workflow, so the working rules reach every agent.
+ *   - every module folder under a configured module root is covered by a doc of record;
+ *   - every doc of record is linked from the nearest AGENTS.md above its docs/ folder;
+ *   - the root AGENTS.md links docs/doc-of-record.md, and carries "docsStandardLine" when the config sets one;
+ *   - no CLAUDE.md, kebab-case names under docs/, AGENTS.md under 200 lines, SKILL.md under 500 lines, a skill
+ *     name equal to its folder name, a skill description of at most 1,024 characters, and rule paths: globs that
+ *     each match a file.
  *
- * Nothing here inspects document content. scripts/check-sdd.mjs owns link resolution, SPEC ids, evidence,
+ * Nothing here inspects meaning. scripts/check-sdd.mjs owns link resolution, doc-of-record frontmatter, evidence,
  * and agent parity. Both run in pre-commit and CI.
  *
  *   node scripts/check-docs.mjs
  *
- * Configuration: .agent-sdd/config.json ("runtimeRoots", "moduleRoots", "exclude").
- * File shapes: docs/agent-sdd/FORMAT.md.
+ * Configuration: .agent-sdd/config.json ("runtimeRoots", "moduleRoots", "exclude", "docsStandardLine").
+ * Shapes: docs/doc-of-record.md.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { docsOfRecord, frontmatter, frontmatterList, frontmatterScalar, matchesGlob, normalize, skipRules, walkFiles } from './sdd-lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_PATH = join(ROOT, '.agent-sdd', 'config.json');
-const FORMAT_DOC = 'docs/agent-sdd/FORMAT.md';
-const SPEC_DOC = 'docs/workflows/SPEC-FIRST-WORKFLOW.md';
-const WORKFLOW_IMPORT = /^@(?:\.\/)?docs\/workflows\/SPEC-FIRST-WORKFLOW\.md\s*$/m;
+const DOC_RULES = 'docs/doc-of-record.md';
 const WORKSPACE_MANIFESTS = ['package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle', 'Chart.yaml'];
+const MAX_AGENTS_LINES = 200;
+const MAX_SKILL_LINES = 500;
+const MAX_DESCRIPTION = 1024;
 const problems = [];
 const fail = (message) => problems.push(message);
 const rel = (path) => relative(ROOT, path).replaceAll('\\', '/');
@@ -41,27 +45,17 @@ if (!config) {
   fail('missing or invalid .agent-sdd/config.json. This file tells the gate where workspaces and modules live; re-run the sdd-enforce "apply --write" command to recreate it.');
 }
 
-const skippedNames = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.turbo']);
-const skippedPrefixes = ['.claude/worktrees'];
-for (const entry of config?.exclude ?? []) {
-  const value = String(entry).replaceAll('\\', '/').replace(/^\.?\//, '').replace(/\/+$/, '');
-  if (!value) continue;
-  if (value.includes('/')) skippedPrefixes.push(value);
-  else skippedNames.add(value);
-}
-
-function isSkipped(path) {
-  const key = rel(path);
-  if (skippedNames.has(basename(path))) return true;
-  return skippedPrefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}/`));
-}
+const { isSkipped } = skipRules(config);
+const allFiles = walkFiles(ROOT, config);
+const read = (path) => normalize(readFileSync(join(ROOT, path), 'utf8'));
+const lineCount = (body) => body.replace(/\n$/, '').split('\n').length;
 
 function directories(path) {
   if (!existsSync(path) || !statSync(path).isDirectory()) return [];
   return readdirSync(path)
     .sort()
     .map((name) => join(path, name))
-    .filter((child) => statSync(child).isDirectory() && !isSkipped(child));
+    .filter((child) => statSync(child).isDirectory() && !isSkipped(rel(child)));
 }
 
 /** Expands a pattern such as "apps/<star>/src/modules" (<star> = one path segment) into existing directories. */
@@ -74,7 +68,7 @@ function expand(pattern) {
       if (segment === '*') next.push(...directories(base));
       else {
         const candidate = join(base, segment);
-        if (existsSync(candidate) && statSync(candidate).isDirectory() && !isSkipped(candidate)) next.push(candidate);
+        if (existsSync(candidate) && statSync(candidate).isDirectory() && !isSkipped(rel(candidate))) next.push(candidate);
       }
     }
     current = next;
@@ -86,73 +80,139 @@ function isWorkspace(dir) {
   return WORKSPACE_MANIFESTS.some((name) => existsSync(join(dir, name)));
 }
 
-function owningAgents(dir) {
+/** Nearest AGENTS.md at or above `dir` (repo-relative), the root one included. */
+function nearestAgents(dir) {
   let cursor = dir;
-  while (cursor !== ROOT && cursor.startsWith(ROOT)) {
-    const candidate = join(cursor, 'AGENTS.md');
-    if (existsSync(candidate)) return candidate;
-    cursor = dirname(cursor);
+  while (true) {
+    const candidate = cursor ? `${cursor}/AGENTS.md` : 'AGENTS.md';
+    if (existsSync(join(ROOT, candidate))) return candidate;
+    if (!cursor) return null;
+    cursor = cursor.includes('/') ? cursor.slice(0, cursor.lastIndexOf('/')) : '';
   }
-  return null;
 }
 
-// 1. Every workspace under a runtime root carries an AGENTS.md (FORMAT.md, document ownership).
+/** Repo-relative targets of the relative Markdown links in `path`. */
+function linkTargets(path) {
+  const out = new Set();
+  for (const match of read(path).matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+    const target = match[1].trim().replace(/^<|>$/g, '').split('#')[0].split('?')[0];
+    if (!target || /^[a-z]+:/i.test(target)) continue;
+    out.add(rel(resolve(ROOT, dirname(path), target)));
+  }
+  return out;
+}
+
+// 1. Every workspace under a runtime root carries an AGENTS.md.
 function checkWorkspaces() {
   for (const root of config?.runtimeRoots ?? []) {
     for (const dir of directories(join(ROOT, String(root)))) {
       if (!isWorkspace(dir)) continue;
       if (!existsSync(join(dir, 'AGENTS.md'))) {
-        fail(`missing AGENTS.md: ${rel(dir)}. Every app or package needs an AGENTS.md with its purpose, commands, and module SPEC index (${FORMAT_DOC}).`);
+        fail(`missing AGENTS.md: ${rel(dir)}. Every app or package needs an AGENTS.md with its gotchas and links to its docs of record (${DOC_RULES}).`);
       }
     }
   }
 }
 
-// 2 + 3. Every module folder carries a SPEC.md, and its owning AGENTS.md links it.
-function checkModules() {
+// 2 + 3. Every module folder is covered by a doc of record, and the nearest AGENTS.md links every doc of record.
+function checkModules(docs) {
   for (const pattern of config?.moduleRoots ?? []) {
     for (const moduleRoot of expand(pattern)) {
       for (const module of directories(moduleRoot)) {
-        const spec = join(module, 'SPEC.md');
-        if (!existsSync(spec)) {
-          fail(`missing SPEC.md: ${rel(module)}. Every module under "${pattern}" needs a SPEC.md (shape in ${FORMAT_DOC}); write it or remove the folder from "moduleRoots" in .agent-sdd/config.json.`);
-          continue;
+        const prefix = `${rel(module)}/`;
+        const moduleFiles = allFiles.filter((path) => path.startsWith(prefix));
+        const covered = moduleFiles.some((path) => docs.some((doc) => doc.covers.some((glob) => matchesGlob(path, glob))));
+        if (!covered) {
+          fail(
+            `module not covered: ${rel(module)}. Every module under "${pattern}" needs a doc of record whose "covers:" matches its files ` +
+              `(shape in ${DOC_RULES}); write it, or remove the folder from "moduleRoots" in .agent-sdd/config.json.`,
+          );
         }
-        const agents = owningAgents(dirname(module));
-        if (!agents) {
-          fail(`${rel(spec)} has no owning AGENTS.md above it. Add an AGENTS.md to the workspace and link the SPEC from its module table.`);
-          continue;
-        }
-        const needle = `${basename(module)}/SPEC.md`;
-        if (!readFileSync(agents, 'utf8').includes(needle)) {
-          fail(`${rel(agents)} does not link ${rel(spec)}. Add a row for "${needle}" to its module SPEC table so readers can find the contract.`);
-        }
+      }
+    }
+  }
+  for (const doc of docs) {
+    const docsDir = dirname(doc.path);
+    const owner = docsDir === 'docs' ? '' : docsDir.slice(0, -'/docs'.length);
+    const agents = nearestAgents(owner);
+    if (!agents) {
+      fail(`${doc.path} has no AGENTS.md above it. Add an AGENTS.md to the workspace and link the doc of record from it.`);
+    } else if (!linkTargets(agents).has(doc.path)) {
+      fail(`${agents} does not link ${doc.path}. Add a Markdown link to it so readers can find the doc of record.`);
+    }
+  }
+}
+
+// 4. The root AGENTS.md points at the doc-of-record rules, and carries the docs standard line when configured.
+function checkRootAgents() {
+  const sdd = (config?.profiles ?? []).includes('sdd');
+  const standard = String(config?.docsStandardLine ?? '').trim();
+  if (!sdd && !standard) return;
+  if (!existsSync(join(ROOT, 'AGENTS.md'))) {
+    fail(`missing AGENTS.md at the repository root. Re-run the sdd-enforce "apply --write" command to create it with the line that links ${DOC_RULES}.`);
+    return;
+  }
+  if (sdd && !linkTargets('AGENTS.md').has(DOC_RULES)) {
+    fail(`AGENTS.md does not link ${DOC_RULES}. Restore the line that points at it, so every agent reads the doc of record before an edit.`);
+  }
+  if (standard && !read('AGENTS.md').split('\n').some((line) => line.trim() === standard)) {
+    fail(`AGENTS.md lacks the docs standard line that "docsStandardLine" in .agent-sdd/config.json sets. Add this line near the top: ${standard}`);
+  }
+}
+
+// 5. The docs standard: where docs live, how they are named, and how large agent docs may grow.
+function checkStandard() {
+  for (const path of allFiles) {
+    const name = basename(path);
+    if (name === 'CLAUDE.md') {
+      fail(`${path}: the repository ships AGENTS.md, never CLAUDE.md, because a CLAUDE.md hides every AGENTS.md from Claude Code. Move each line that AGENTS.md lacks into the AGENTS.md beside it, then delete ${path}.`);
+    }
+    if (/(?:^|\/)docs\/(?:.*\/)?[^/]*[A-Z_][^/]*\.md$/.test(path) && !['README.md', 'AGENTS.md'].includes(name)) {
+      const target = path.slice(0, -name.length) + name.replace(/\.md$/, '').replace(/_/g, '-').replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase() + '.md';
+      fail(`${path}: a doc under docs/ needs a kebab-case name. Run "git mv ${path} ${target}" and update every link to it.`);
+    }
+    if (name === 'AGENTS.md' && lineCount(read(path)) >= MAX_AGENTS_LINES) {
+      fail(`${path} has ${lineCount(read(path))} lines; keep an AGENTS.md under ${MAX_AGENTS_LINES}. Move reference material into the docs it points at.`);
+    }
+    if (name === 'SKILL.md') checkSkill(path);
+  }
+  for (const path of allFiles.filter((item) => /^\.claude\/rules\/[^/]+\.md$/.test(item))) {
+    const block = frontmatter(read(path));
+    for (const glob of (block ? frontmatterList(block, 'paths') : null) ?? []) {
+      if (!allFiles.some((file) => matchesGlob(file, glob))) {
+        fail(`${path}: the "paths:" glob "${glob}" matches no file, so the rule never loads there. Fix the glob or remove it.`);
       }
     }
   }
 }
 
-// 4. The root AGENTS.md imports the working rules; without that line the SPEC-first policy never reaches an agent.
-function checkImport() {
-  if (!(config?.profiles ?? []).includes('sdd')) return;
-  const rootAgents = join(ROOT, 'AGENTS.md');
-  if (!existsSync(rootAgents)) {
-    fail(`missing AGENTS.md at the repository root. Create it with the line @./${SPEC_DOC} so the working rules reach every agent.`);
-    return;
+function checkSkill(path) {
+  const body = read(path);
+  if (lineCount(body) >= MAX_SKILL_LINES) {
+    fail(`${path} has ${lineCount(body)} lines; keep a SKILL.md under ${MAX_SKILL_LINES}. Move reference material one level down into references/.`);
   }
-  if (!WORKFLOW_IMPORT.test(readFileSync(rootAgents, 'utf8'))) {
-    fail(`AGENTS.md no longer imports the working rules. Restore this line on its own: @./${SPEC_DOC}`);
+  const block = frontmatter(body);
+  const folder = basename(dirname(path));
+  const name = block ? frontmatterScalar(block, 'name') : null;
+  if (name !== folder) {
+    fail(`${path}: the frontmatter "name" is ${name === null ? 'missing' : `"${name}"`}; set it to the folder name "${folder}".`);
+  }
+  const description = block ? (frontmatterScalar(block, 'description') ?? '') : '';
+  if (description.length > MAX_DESCRIPTION) {
+    fail(`${path}: the description has ${description.length} characters; keep it at most ${MAX_DESCRIPTION}.`);
   }
 }
 
 function main() {
+  const docs = docsOfRecord(ROOT, allFiles);
   checkWorkspaces();
-  checkModules();
-  checkImport();
+  checkModules(docs);
+  checkRootAgents();
+  checkStandard();
   if (problems.length) {
     console.error(`check-docs found ${problems.length} problem(s). Each line says what is wrong and how to fix it:`);
     for (const problem of problems) console.error(`  x ${problem}`);
-    console.error(`File shapes: ${FORMAT_DOC}. Procedure: ${SPEC_DOC}.`);
+    console.error(`Shapes and rules: ${DOC_RULES}.`);
     process.exit(1);
   }
   console.log('check-docs: ok');

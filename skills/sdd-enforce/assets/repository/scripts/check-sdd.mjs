@@ -1,34 +1,36 @@
 #!/usr/bin/env node
 /**
- * Generated SDD gate: documentation reachability, SPEC ids and evidence, agent parity, configured
+ * Generated SDD gate: documentation reachability, doc-of-record ids and evidence, agent parity, configured
  * runtime-config propagation, Helm chart configuration, and per-change impact.
  *
  *   node scripts/check-sdd.mjs
  *   node scripts/check-sdd.mjs --staged --commit-msg <path>
  *   node scripts/check-sdd.mjs --changed [--base <git-ref>]
  *
- * Every reported line says what is wrong and how to fix it. File shapes: docs/agent-sdd/FORMAT.md.
- * Procedure: docs/workflows/SPEC-FIRST-WORKFLOW.md and docs/workflows/AGENT-PARITY-WORKFLOW.md.
+ * Every reported line says what is wrong and how to fix it. Shapes and rules: docs/doc-of-record.md.
+ * Tool parity: docs/agent-parity.md.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cursorRulesProblems } from './gen-cursor-rules.mjs';
+import { DOC_ID, docOfRecord, matchesGlob, normalize, skipRules, walkFiles } from './sdd-lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_PATH = join(ROOT, '.agent-sdd', 'config.json');
 const WAIVERS_PATH = join(ROOT, '.agent-sdd', 'waivers.json');
-const WAIVER_GATES = ['spec-impact', 'agent-parity'];
+// "spec-impact" is the name of the doc-impact gate before 1.0.0; waivers written under it stay valid.
+const WAIVER_GATES = ['doc-impact', 'agent-parity'];
+const WAIVER_ALIASES = { 'spec-impact': 'doc-impact' };
 const MIN_REASON_WORDS = 8;
 const MIN_WAIVER_WORDS = 12;
-const HOOK_SCRIPT = 'scripts/hooks/post-edit-reminder.mjs';
-const FORMAT_DOC = 'docs/agent-sdd/FORMAT.md';
-const SPEC_DOC = 'docs/workflows/SPEC-FIRST-WORKFLOW.md';
-const PARITY_DOC = 'docs/workflows/AGENT-PARITY-WORKFLOW.md';
+const HOOK_SCRIPT = '.claude/hooks/post-edit-reminder.mjs';
+const LEGACY_HOOK_SCRIPT = 'scripts/hooks/post-edit-reminder.mjs';
+const DOC_RULES = 'docs/doc-of-record.md';
+const PARITY_DOC = 'docs/agent-parity.md';
 const problems = [];
 const fail = (message) => problems.push(message);
-const normalize = (value) => value.replace(/^﻿/, '').replaceAll('\r\n', '\n');
 const rel = (path) => relative(ROOT, path).replaceAll('\\', '/');
 
 function json(path) {
@@ -52,48 +54,12 @@ const HOOK_CONFIG_PATHS = {
 };
 const enabledAgents = new Set(config?.agents?.length ? config.agents : Object.keys(HOOK_CONFIG_PATHS));
 
-// A copy of the sdd-enforce skill itself may be kept inside this repository (.claude/.agents/.cursor skills).
-// Its bundled templates, SPEC, and SKILL.md are tooling, not repository policy, so the gate never reads them.
-// Other tool skills installed in-repo go into "exclude" in .agent-sdd/config.json.
-// cross-agent-sdd is the skill's former name; copies installed under it are skipped too.
-const TOOL_SKILL_DIRS = ['.claude', '.agents', '.cursor'].flatMap((root) =>
-  ['sdd-enforce', 'cross-agent-sdd'].map((name) => `${root}/skills/${name}`),
-);
-const skippedNames = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.turbo']);
-// Claude Code keeps its worktrees inside the checkout (.claude/worktrees/<name>), each one a full copy of the
-// repository. Reading them from the main checkout reports every SPEC twice ("duplicate SPEC id") and blocks every
-// commit while any worktree exists. Skipped by path, not by name: "worktrees" is too ordinary a name to skip anywhere.
-const WORKTREE_DIRS = ['.claude/worktrees'];
-const skippedPrefixes = [...TOOL_SKILL_DIRS, ...WORKTREE_DIRS];
-for (const entry of config?.exclude ?? []) {
-  const value = String(entry).replaceAll('\\', '/').replace(/^\.?\//, '').replace(/\/+$/, '');
-  if (!value) continue;
-  if (value.includes('/')) skippedPrefixes.push(value);
-  else skippedNames.add(value);
-}
-
-function isSkippedPath(path) {
-  const key = rel(path);
-  return skippedPrefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}/`));
-}
-
-function walk(path, predicate, out = []) {
-  if (!existsSync(path)) return out;
-  if (path !== ROOT && isSkippedPath(path)) return out;
-  const info = statSync(path);
-  if (info.isFile()) {
-    if (predicate(path)) out.push(path);
-    return out;
-  }
-  for (const name of readdirSync(path)) {
-    if (skippedNames.has(name)) continue;
-    walk(join(path, name), predicate, out);
-  }
-  return out;
-}
+const { isSkipped: isSkippedKey } = skipRules(config);
+const allFiles = walkFiles(ROOT, config);
+const isSkippedPath = (path) => isSkippedKey(rel(path));
 
 function files(predicate) {
-  return walk(ROOT, predicate);
+  return allFiles.map((path) => join(ROOT, path)).filter(predicate);
 }
 
 function git(args) {
@@ -144,119 +110,102 @@ function checkDocs() {
   }
 
   for (const path of markdown) {
-    const name = basename(path);
-    if (!['AGENTS.md', 'SPEC.md'].includes(name)) continue;
-    if (rel(path) === 'AGENTS.md') continue;
-    if (!inbound.has(rel(path))) {
-      fail(`unreachable ${name}: ${rel(path)}. No other Markdown file links to it, so people and agents cannot find it. Add a link from the nearest AGENTS.md or README.md.`);
+    const key = rel(path);
+    if (key === 'AGENTS.md') continue;
+    const kind = basename(path) === 'AGENTS.md' ? 'AGENTS.md' : docOfRecord(key, readFileSync(path, 'utf8')) ? 'doc of record' : null;
+    if (kind && !inbound.has(key)) {
+      fail(`unreachable ${kind}: ${key}. No other Markdown file links to it, so people and agents cannot find it. Add a link from the nearest AGENTS.md or README.md.`);
     }
   }
 }
 
-function specMetadata(path, body) {
-  if (!body.startsWith('---\n')) {
-    fail(`missing SPEC frontmatter: ${rel(path)}. Every SPEC.md starts with a "---" block that contains "id: <unique-id>" (shape in ${FORMAT_DOC}).`);
-    return { id: null, critical: [] };
-  }
-  const end = body.indexOf('\n---\n', 4);
-  if (end < 0) {
-    fail(`unterminated SPEC frontmatter: ${rel(path)}. The opening "---" line has no closing "---" line.`);
-    return { id: null, critical: [] };
-  }
-  const frontmatter = body.slice(4, end);
-  const id = frontmatter.match(/^id:\s*([a-z0-9]+(?:[.-][a-z0-9]+)*)\s*$/m)?.[1] ?? null;
-  if (!id) {
-    fail(`missing or invalid stable id: ${rel(path)}. Add "id: <lowercase id, dots or dashes allowed>" inside the frontmatter. Tests cite this id, so it never changes once set.`);
-  }
-  const critical = [];
-  let active = false;
-  for (const line of frontmatter.split('\n')) {
-    if (/^critical:\s*$/.test(line)) {
-      active = true;
-      continue;
-    }
-    if (!active) continue;
-    const item = line.match(/^\s+-\s+(V\d+)\s*$/)?.[1];
-    if (item) critical.push(item);
-    else if (line.trim() && !/^\s/.test(line)) active = false;
-  }
-  return { id, critical };
+function ledgerHeading(body) {
+  return body.match(/^##\s+(?:Tasks|Bugs|§T|§B)\b[^\n]*$/m)?.[0] ?? null;
 }
 
-function ledgerSection(body, heading, prefix) {
-  const match = new RegExp(`^##\\s+(?:${heading}|§${prefix})\\b[^\\n]*\\n`, 'mi').exec(body);
-  if (!match) return null;
-  const start = match.index + match[0].length;
-  const tail = body.slice(start);
-  const nextHeading = /^##\s+/m.exec(tail);
-  return nextHeading ? tail.slice(0, nextHeading.index) : tail;
-}
+const CITATION_EXTENSIONS = ['.cjs', '.go', '.java', '.js', '.jsx', '.kt', '.md', '.mjs', '.py', '.rs', '.ts', '.tsx'];
+const isTestFile = (key) => /(?:^|\/)(?:__tests__\/|[^/]+\.(?:spec|test)\.[^/]+$)/.test(key);
 
-function checkSpecs() {
-  const specFiles = files((path) => basename(path) === 'SPEC.md');
-  const specs = new Map();
-  for (const path of specFiles) {
+function checkDocsOfRecord() {
+  for (const path of files((item) => basename(item) === 'SPEC.md')) {
+    fail(
+      `${rel(path)}: a module doc is no longer a SPEC.md. Move it to <workspace>/docs/<module>.md, add "covers:" globs for the files it owns, ` +
+        `use the long headings, and drop the Tasks, Bugs and Files tables (shape in ${DOC_RULES}).`,
+    );
+  }
+  const docs = new Map();
+  for (const path of files((item) => extname(item) === '.md')) {
+    const key = rel(path);
     const body = normalize(readFileSync(path, 'utf8'));
-    const { id, critical } = specMetadata(path, body);
+    const doc = docOfRecord(key, body);
+    if (!doc) continue;
+    if (!doc.id || !DOC_ID.test(doc.id)) {
+      fail(`missing or invalid stable id: ${key}. Add "id: <lowercase id, dots or dashes allowed>" to the frontmatter. Tests cite this id, so it never changes once set.`);
+    }
+    if (!doc.hasCovers || !doc.covers.length) {
+      fail(`${key} has no "covers:" globs. List the files this doc of record owns, as globs relative to the repository root (${DOC_RULES}).`);
+    }
+    const docsDir = dirname(key);
+    const owner = docsDir === 'docs' ? '' : docsDir.slice(0, -'/docs'.length);
+    for (const glob of doc.covers) {
+      if (!allFiles.some((file) => matchesGlob(file, glob))) {
+        fail(`${key}: the "covers:" glob "${glob}" matches no file. Fix the glob or remove it.`);
+      }
+      if (owner && !String(glob).replace(/^\.?\//, '').startsWith(`${owner}/`)) {
+        fail(`${key}: the "covers:" glob "${glob}" is outside ${owner}. A doc in ${docsDir}/ covers files of that workspace only; move a doc that spans workspaces to the root docs/.`);
+      }
+    }
     const invariants = new Set();
     for (const match of body.matchAll(/^(?:-\s+)?(?:\*\*)?(V\d+)(?:\*\*)?:/gm)) {
       if (invariants.has(match[1])) {
-        fail(`duplicate invariant ${match[1]}: ${rel(path)}. Each V<n> id appears once; give the second one a new number and never reuse a retired number.`);
+        fail(`duplicate invariant ${match[1]}: ${key}. Each V<n> id appears once; give the second one a new number and never reuse a retired number.`);
       }
       invariants.add(match[1]);
     }
-    for (const invariant of critical) {
+    for (const invariant of doc.critical) {
       if (!invariants.has(invariant)) {
-        fail(`critical invariant does not exist: ${id ?? rel(path)}:${invariant}. The frontmatter lists ${invariant} under "critical:" but the body has no line starting with "${invariant}:". Add the invariant or remove it from the list.`);
+        fail(`critical invariant does not exist: ${doc.id ?? key}:${invariant}. The frontmatter lists ${invariant} under "critical:" but the body has no line starting with "${invariant}:". Add the invariant or remove it from the list.`);
       }
     }
-    for (const [heading, prefix, example] of [
-      ['Tasks', 'T', 'T1|status|task|cites'],
-      ['Bugs', 'B', 'B1|date|cause|fix'],
-    ]) {
-      const section = ledgerSection(body, heading, prefix);
-      if (section !== null && !new RegExp(`^${prefix}\\d+\\s*\\|`, 'm').test(section)) {
-        fail(`empty ${heading} ledger: ${rel(path)}. Add the first row (${example}) or remove the "## ${heading}" heading until there is one.`);
-      }
+    const ledger = ledgerHeading(body);
+    if (ledger) {
+      fail(`${key}: "${ledger}" does not belong in a doc of record. Move open work and bugs to the issue tracker and delete the section; the doc states the current code only.`);
     }
-    if (!id) continue;
-    if (specs.has(id)) {
-      fail(`duplicate SPEC id ${id}: ${rel(specs.get(id).path)} + ${rel(path)}. Give each SPEC.md its own id.`);
+    if (!doc.id || !DOC_ID.test(doc.id)) continue;
+    if (docs.has(doc.id)) {
+      fail(`duplicate doc of record id ${doc.id}: ${docs.get(doc.id).key} + ${key}. Give each doc of record its own id.`);
     } else {
-      specs.set(id, { path, invariants, critical });
+      docs.set(doc.id, { key, invariants, critical: doc.critical });
     }
   }
 
-  const citationFiles = files((path) =>
-    ['.cjs', '.go', '.java', '.js', '.jsx', '.kt', '.md', '.mjs', '.py', '.rs', '.ts', '.tsx'].includes(
-      extname(path).toLowerCase(),
-    ),
-  );
   const evidence = new Set();
-  for (const path of citationFiles) {
+  for (const path of files((item) => CITATION_EXTENSIONS.includes(extname(item).toLowerCase()))) {
+    const key = rel(path);
     const body = normalize(readFileSync(path, 'utf8'));
     for (const match of body.matchAll(/@spec\s+([a-z0-9]+(?:[.-][a-z0-9]+)*):(V\d+)\b/g)) {
-      const spec = specs.get(match[1]);
-      if (!spec) {
-        fail(`citation names unknown SPEC ${match[1]}: ${rel(path)}. The "@spec ${match[1]}:${match[2]}" text points at a SPEC id that does not exist; fix the id or add the SPEC.`);
+      fail(`${key}: "@spec ${match[1]}:${match[2]}" is the citation form before 1.0.0. Write "@invariant ${match[1]}:${match[2]}" instead.`);
+    }
+    for (const match of body.matchAll(/@invariant\s+([a-z0-9]+(?:[.-][a-z0-9]+)*):(V\d+)\b/g)) {
+      const doc = docs.get(match[1]);
+      if (!doc) {
+        fail(`citation names unknown doc of record ${match[1]}: ${key}. The "@invariant ${match[1]}:${match[2]}" text points at an id that does not exist; fix the id or add the doc.`);
         continue;
       }
-      if (!spec.invariants.has(match[2])) {
-        fail(`citation names unknown invariant ${match[1]}:${match[2]}: ${rel(path)}. ${rel(spec.path)} has no "${match[2]}:" line; fix the number in the citation or add the invariant.`);
+      if (!doc.invariants.has(match[2])) {
+        fail(`citation names unknown invariant ${match[1]}:${match[2]}: ${key}. ${doc.key} has no "${match[2]}:" line; fix the number in the citation or add the invariant.`);
         continue;
       }
-      if (/(?:^|\/)(?:__tests__\/|[^/]+\.(?:spec|test)\.[^/]+$)/.test(rel(path))) {
-        evidence.add(`${match[1]}:${match[2]}`);
-      }
+      if (isTestFile(key)) evidence.add(`${match[1]}:${match[2]}`);
     }
   }
-  for (const [id, spec] of specs) {
-    for (const invariant of spec.critical) {
+  for (const [id, doc] of docs) {
+    for (const invariant of doc.critical) {
       if (!evidence.has(`${id}:${invariant}`)) {
         fail(
-          `critical invariant lacks executable evidence: ${id}:${invariant} (${rel(spec.path)}). ${invariant} is marked critical, so a test must prove it: ` +
-            `put "@spec ${id}:${invariant}" in a test title or a comment inside a *.test.* / *.spec.* / __tests__ file. ` +
-            `If ${invariant} cannot be tested as written, ask the SPEC owner to split it or remove it from "critical:". Never cite a test that proves only part of it.`,
+          `critical invariant lacks executable evidence: ${id}:${invariant} (${doc.key}). ${invariant} is marked critical, so a test must prove it: ` +
+            `put "@invariant ${id}:${invariant}" in a test title or a comment inside a *.test.* / *.spec.* / __tests__ file. ` +
+            `If ${invariant} cannot be tested as written, ask the owner to split it or remove it from "critical:". Never cite a test that proves only part of it.`,
         );
       }
     }
@@ -268,36 +217,64 @@ function skillNames(base) {
   return readdirSync(base).filter((name) => existsSync(join(base, name, 'SKILL.md')) && !isSkippedPath(join(base, name)));
 }
 
-function checkAdapterLinks(adapterPath) {
-  const adapter = rel(adapterPath);
-  const workflows = [
+/** Repo-relative concern docs (Markdown directly under a docs/ folder) that `path` links. */
+function concernDocLinks(path) {
+  return [
     ...new Set(
-      markdownLinks(adapterPath)
+      markdownLinks(path)
         .map((link) => rel(link.absolute))
-        .filter((target) => /^docs\/workflows\/[^/]+\.md$/.test(target)),
+        .filter((target) => /(?:^|\/)docs\/[^/]+\.md$/.test(target)),
     ),
   ];
-  if (workflows.length !== 1) {
-    fail(`adapter must link exactly one canonical docs/workflows document (found ${workflows.length}): ${adapter}. Adapters stay thin: one Markdown link to the workflow they implement, no copied steps.`);
-    return;
+}
+
+/**
+ * A rule links exactly one concern doc, and that doc links the rule back. A Codex/Cursor adapter of a rule links
+ * the rule's concern doc; the adapter of a Claude skill links that SKILL.md.
+ */
+function checkAdapterLinks() {
+  const rulesDir = join(ROOT, '.claude', 'rules');
+  const ruleDocs = new Map();
+  if (existsSync(rulesDir)) {
+    for (const name of readdirSync(rulesDir)) {
+      if (!name.endsWith('.md') || name === 'INDEX.md') continue;
+      const rulePath = join(rulesDir, name);
+      const rule = rel(rulePath);
+      const docs = concernDocLinks(rulePath);
+      if (docs.length !== 1) {
+        fail(`rule must link exactly one concern doc (found ${docs.length}): ${rule}. A rule holds short imperatives and one link to the doc that holds them in full.`);
+        continue;
+      }
+      ruleDocs.set(name.replace(/\.md$/, ''), docs[0]);
+      const docPath = join(ROOT, docs[0]);
+      if (!existsSync(docPath)) continue; // checkDocs reports the dangling link.
+      if (!markdownLinks(docPath).some((link) => rel(link.absolute) === rule)) {
+        fail(`${docs[0]} does not link back to ${rule}. Add a line that links the rule, so readers find both directions.`);
+      }
+    }
   }
-  const workflowPath = join(ROOT, workflows[0]);
-  if (!existsSync(workflowPath)) return; // checkDocs reports the dangling link.
-  // A generated Cursor mirror is reached through its source rule: that rule's own back-link check covers it.
-  const mirror = adapter.match(/^\.cursor\/rules\/([^/]+)\.mdc$/);
-  if (mirror && existsSync(join(ROOT, '.claude', 'rules', `${mirror[1]}.md`))) return;
-  if (!markdownLinks(workflowPath).some((link) => rel(link.absolute) === adapter)) {
-    fail(`${workflows[0]} does not link back to ${adapter}. Add the adapter to the "Adapters:" list in that workflow so readers can find both directions.`);
+  for (const name of skillNames(join(ROOT, '.agents', 'skills'))) {
+    const adapterPath = join(ROOT, '.agents', 'skills', name, 'SKILL.md');
+    const adapter = rel(adapterPath);
+    const targets = new Set(markdownLinks(adapterPath).map((link) => rel(link.absolute)));
+    const claudeSkill = `.claude/skills/${name}/SKILL.md`;
+    if (existsSync(join(ROOT, claudeSkill))) {
+      if (!targets.has(claudeSkill)) {
+        fail(`${adapter} does not link ${claudeSkill}. The Codex/Cursor twin of a skill links the Claude skill, which holds the steps.`);
+      }
+    } else if (ruleDocs.has(name) && !targets.has(ruleDocs.get(name))) {
+      fail(`${adapter} does not link ${ruleDocs.get(name)}. The Codex/Cursor adapter of a rule links the same concern doc as .claude/rules/${name}.md.`);
+    }
   }
 }
 
-function hookCommands(value, out = []) {
+function hookCommands(value, out = [], script = HOOK_SCRIPT) {
   if (typeof value === 'string') {
-    if (value.replaceAll('\\', '/').includes(HOOK_SCRIPT)) out.push(value);
+    if (value.replaceAll('\\', '/').includes(script)) out.push(value);
   } else if (Array.isArray(value)) {
-    for (const item of value) hookCommands(item, out);
+    for (const item of value) hookCommands(item, out, script);
   } else if (value && typeof value === 'object') {
-    for (const item of Object.values(value)) hookCommands(item, out);
+    for (const item of Object.values(value)) hookCommands(item, out, script);
   }
   return out;
 }
@@ -309,12 +286,12 @@ function checkAgents() {
   if (agents.has('claude') && (agents.has('codex') || agents.has('cursor'))) {
     for (const name of claudeSkills) {
       if (!sharedSkills.has(name)) {
-        fail(`Claude skill lacks .agents counterpart: ${name}. Create .agents/skills/${name}/SKILL.md (plus agents/openai.yaml) so Codex and Cursor get the same workflow (${PARITY_DOC}).`);
+        fail(`Claude skill lacks .agents counterpart: ${name}. Create .agents/skills/${name}/SKILL.md that links the Claude skill, plus agents/openai.yaml, so Codex and Cursor find it (${PARITY_DOC}).`);
       }
     }
     for (const name of sharedSkills) {
       if (!claudeSkills.has(name) && !existsSync(join(ROOT, '.claude', 'rules', `${name}.md`))) {
-        fail(`.agents skill lacks Claude counterpart: ${name}. Create .claude/rules/${name}.md (for a path-scoped rule) or .claude/skills/${name}/SKILL.md (for a command a person invokes).`);
+        fail(`.agents skill lacks Claude counterpart: ${name}. Create .claude/rules/${name}.md (for a path-scoped rule) or .claude/skills/${name}/SKILL.md (for a procedure someone starts).`);
       }
     }
   }
@@ -332,20 +309,7 @@ function checkAgents() {
     }
   }
 
-  const adapters = [];
-  for (const base of [join(ROOT, '.claude', 'skills'), join(ROOT, '.agents', 'skills')]) {
-    for (const name of skillNames(base)) adapters.push(join(base, name, 'SKILL.md'));
-  }
-  for (const [dir, extension] of [
-    [join(ROOT, '.claude', 'rules'), '.md'],
-    [join(ROOT, '.cursor', 'rules'), '.mdc'],
-  ]) {
-    if (!existsSync(dir)) continue;
-    for (const name of readdirSync(dir)) {
-      if (name.endsWith(extension) && name !== 'INDEX.md') adapters.push(join(dir, name));
-    }
-  }
-  for (const adapter of adapters) checkAdapterLinks(adapter);
+  checkAdapterLinks();
 
   const hookConfigs = HOOK_CONFIG_PATHS;
   for (const agent of agents) {
@@ -357,6 +321,10 @@ function checkAgents() {
     const data = json(join(ROOT, path));
     if (!data) continue;
     const commands = hookCommands(data);
+    if (!commands.length && hookCommands(data, [], LEGACY_HOOK_SCRIPT).length) {
+      fail(`${path} still runs ${LEGACY_HOOK_SCRIPT}, the path before 1.0.0. Re-run the sdd-enforce "apply --write" command; it moves the hook to ${HOOK_SCRIPT}.`);
+      continue;
+    }
     if (!commands.length) {
       fail(`${path} does not run ${HOOK_SCRIPT}. Every enabled AI tool must call the same reminder script after it edits a file; re-run "apply --write" or add the hook back.`);
       continue;
@@ -474,20 +442,19 @@ function workspaceRoot(path, runtimeRoot) {
   return runtimeRoot;
 }
 
-function ownerFor(path) {
+/** Owners of a runtime file: every doc of record whose "covers:" matches it, else the workspace AGENTS.md. */
+let docsCache = null;
+function ownersFor(path) {
   const runtimeRoot = runtimeRootFor(path);
-  if (!runtimeRoot) return null;
-  const workspace = workspaceRoot(path, runtimeRoot);
-  const boundary = resolve(ROOT, workspace);
-  let cursor = resolve(ROOT, dirname(path));
-  while (cursor === boundary || cursor.startsWith(`${boundary}\\`) || cursor.startsWith(`${boundary}/`)) {
-    const spec = join(cursor, 'SPEC.md');
-    if (existsSync(spec)) return rel(spec);
-    if (cursor === boundary) break;
-    cursor = dirname(cursor);
-  }
-  const agents = join(boundary, 'AGENTS.md');
-  return existsSync(agents) ? rel(agents) : null;
+  if (!runtimeRoot) return [];
+  docsCache ??= allFiles
+    .filter((key) => key.endsWith('.md'))
+    .map((key) => docOfRecord(key, readFileSync(join(ROOT, key), 'utf8')))
+    .filter(Boolean);
+  const docs = docsCache.filter((doc) => doc.covers.some((glob) => matchesGlob(path, glob))).map((doc) => doc.path);
+  if (docs.length) return docs;
+  const agents = `${workspaceRoot(path, runtimeRoot)}/AGENTS.md`;
+  return existsSync(join(ROOT, agents)) ? [agents] : [];
 }
 
 /**
@@ -495,8 +462,8 @@ function ownerFor(path) {
  * trailers fold: every following line that starts with whitespace continues it. Commit linters cap a body line
  * (commitlint: 100 characters) and a reason that names several files does not fit on one line.
  */
-function trailer(message, name) {
-  const match = message.match(new RegExp(`^${name}:\\s*none\\s*(?:--|—|–|-)\\s*(.*)$`, 'im'));
+function trailer(message, ...names) {
+  const match = message.match(new RegExp(`^(?:${names.join('|')}):\\s*none\\s*(?:--|—|–|-)\\s*(.*)$`, 'im'));
   if (!match) return null;
   const following = message.slice(match.index + match[0].length).split(/\r?\n/).slice(1);
   const folded = [match[1]];
@@ -561,28 +528,29 @@ function impactProblems(changedFiles, message, label, waived = new Set()) {
   const changed = new Set(
     changedFiles.map((path) => path.replaceAll('\\', '/')).filter((path) => !isSkippedPath(join(ROOT, path))),
   );
-  if (!waived.has('spec-impact')) {
+  if (!waived.has('doc-impact')) {
     const missing = [];
     for (const path of changed) {
       if (!isRuntimeFile(path)) continue;
-      const owner = ownerFor(path);
-      if (!owner || !changed.has(owner)) missing.push({ path, owner });
+      const owners = ownersFor(path);
+      if (!owners.some((owner) => changed.has(owner))) missing.push({ path, owners });
     }
     if (missing.length) {
       const listing = missing
-        .map((item) => `${item.path} (owner: ${item.owner ?? 'none found - add a SPEC.md or AGENTS.md above it'})`)
+        .map((item) => `${item.path} (owner: ${item.owners.join(' or ') || 'none found - add a doc of record that covers it, or an AGENTS.md'})`)
         .join(', ');
-      const reason = trailer(message, 'Spec-Impact');
+      // Spec-Impact is the trailer name before 1.0.0; commits already written with it stay valid.
+      const reason = trailer(message, 'Doc-Impact', 'Spec-Impact');
       if (reason === null) {
         fail(
-          `${label}: runtime paths lack owning contract change: ${listing}. These files changed but the SPEC.md or AGENTS.md that owns them did not. ` +
-            'Either update the owner in the same commit, or add this line to the commit message: ' +
-            '"Spec-Impact: none - <at least 8 words naming each file and why behavior cannot change>". ' +
-            `Procedure: ${SPEC_DOC}.`,
+          `${label}: runtime paths lack an owner change: ${listing}. These files changed but no doc of record or AGENTS.md that owns them did. ` +
+            'Either update an owner in the same commit, or add this line to the commit message: ' +
+            '"Doc-Impact: none - <at least 8 words naming each file and why behavior cannot change>". ' +
+            `Rules: ${DOC_RULES}.`,
         );
       } else {
         for (const problem of reasonProblems(reason, missing.map((item) => item.path))) {
-          fail(`${label}: rejected Spec-Impact trailer: ${problem}. Files without an owner change: ${missing.map((item) => item.path).join(', ')}.`);
+          fail(`${label}: rejected Doc-Impact trailer: ${problem}. Files without an owner change: ${missing.map((item) => item.path).join(', ')}.`);
         }
       }
     }
@@ -593,15 +561,12 @@ function impactProblems(changedFiles, message, label, waived = new Set()) {
   const present = (path) => path.endsWith('/') ? [...changed].some((item) => item.startsWith(path)) : changed.has(path);
   const partnerGroups = (path) => {
     let match;
-    if ((match = path.match(/^\.claude\/skills\/([^/]+)\//))) return [[`.agents/skills/${match[1]}/`]];
-    if ((match = path.match(/^\.agents\/skills\/([^/]+)\/SKILL\.md$/))) {
-      return [[`.claude/skills/${match[1]}/`, `.claude/rules/${match[1]}.md`]];
-    }
+    // A skill's twin links it and holds no steps, so an edit to either side alone needs no partner.
     // A legacy INDEX.md (rules index up to 0.4.0) is not a rule: gen-cursor-rules skips it, so it has no mirror.
     if ((match = path.match(/^\.claude\/rules\/([^/]+)\.md$/))) return match[1] === 'INDEX' ? [] : [[`.cursor/rules/${match[1]}.mdc`]];
     if ((match = path.match(/^\.cursor\/rules\/([^/]+)\.mdc$/))) return [[`.claude/rules/${match[1]}.md`]];
     // Hook configs move together: each other enabled tool's config must change in the same commit. The
-    // changed file is never its own partner. The shared hook script under scripts/hooks needs no config change.
+    // changed file is never its own partner. The shared hook script under .claude/hooks needs no config change.
     if (Object.values(HOOK_CONFIG_PATHS).includes(path)) {
       return Object.entries(HOOK_CONFIG_PATHS)
         .filter(([agent, other]) => other !== path && enabledAgents.has(agent))
@@ -655,7 +620,7 @@ function loadWaivers() {
       errors.push(`${at}: "gates" must be a non-empty array (allowed: ${WAIVER_GATES.join(', ')})`);
     } else {
       for (const gate of entry.gates) {
-        if (!WAIVER_GATES.includes(gate)) errors.push(`${at}: unknown gate "${gate}" (allowed: ${WAIVER_GATES.join(', ')})`);
+        if (!WAIVER_GATES.includes(WAIVER_ALIASES[gate] ?? gate)) errors.push(`${at}: unknown gate "${gate}" (allowed: ${WAIVER_GATES.join(', ')})`);
       }
     }
     const words = typeof entry.reason === 'string' ? entry.reason.trim().split(/\s+/).filter(Boolean) : [];
@@ -667,7 +632,7 @@ function loadWaivers() {
     for (const error of errors) fail(`.agent-sdd/waivers.json: ${error}.`);
     return null;
   }
-  return new Map(entries.map((entry) => [entry.commit, new Set(entry.gates)]));
+  return new Map(entries.map((entry) => [entry.commit, new Set(entry.gates.map((gate) => WAIVER_ALIASES[gate] ?? gate))]));
 }
 
 /**
@@ -707,7 +672,7 @@ function checkChangeImpact(args) {
   if (staged) {
     const messagePath = option(args, '--commit-msg');
     if (!messagePath) {
-      fail('--staged requires --commit-msg <path>: the gate reads the commit message to accept "Spec-Impact: none" and "Agent-Parity: none" explanations. In a commit-msg hook pass "$1".');
+      fail('--staged requires --commit-msg <path>: the gate reads the commit message to accept "Doc-Impact: none" and "Agent-Parity: none" explanations. In a commit-msg hook pass "$1".');
       return;
     }
     const changedFiles = git(['diff', '--cached', '--name-only', '--diff-filter=ACMRD']).split('\n').filter(Boolean);
@@ -740,7 +705,7 @@ function checkChangeImpact(args) {
 function main() {
   const args = process.argv.slice(2);
   checkDocs();
-  checkSpecs();
+  checkDocsOfRecord();
   checkAgents();
   checkConfigGroups();
   checkHelmConfig();
@@ -749,7 +714,7 @@ function main() {
   if (problems.length) {
     console.error(`check-sdd found ${problems.length} problem(s). Each line says what is wrong and how to fix it:`);
     for (const problem of problems) console.error(`  x ${problem}`);
-    console.error(`File shapes: ${FORMAT_DOC}. Procedure: ${SPEC_DOC}. Tool parity: ${PARITY_DOC}.`);
+    console.error(`Shapes and rules: ${DOC_RULES}. Tool parity: ${PARITY_DOC}.`);
     process.exit(1);
   }
   console.log('check-sdd: ok');
