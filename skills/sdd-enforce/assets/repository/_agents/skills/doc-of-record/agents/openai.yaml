@@ -1,0 +1,4 @@
+interface:
+  display_name: "Doc of record"
+  short_description: "Read and update the doc of record before code edits"
+  default_prompt: "Use $doc-of-record to reconcile the doc of record, the evidence, and the code for this change."
