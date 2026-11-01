@@ -91,10 +91,20 @@ Repositories set up under the old name keep working. `apply` reads the old `cros
 
 Two ways.
 
-**Through your AI tool.** Open the repository and ask, for example: "Set up sdd-enforce in this repo". The
-tool loads the skill, runs an audit, shows you a plan, and applies it only after the plan is clean. It also
-does the parts that a script cannot guess. It sets the folders that hold application code, moves old-format
-docs, and tells you how to wire Git hooks and CI.
+**Through your AI tool.** Open the repository and run the skill with no arguments, for example
+`/maxim-ai:sdd-enforce` in Claude Code. The skill shows a menu with four actions:
+
+| Action | What it does |
+|---|---|
+| Audit | Reports what the repository has and what the gates would fail on. Changes nothing. |
+| Apply SDD | Installs or upgrades the policy. It runs an audit and a plan, and writes only after your OK. |
+| Verify | Checks that the installed files are intact and that both gates are green. Changes nothing. |
+| Remove | Lists what uninstall would delete, and deletes only after your explicit yes. |
+
+To skip the menu, name the action: `/maxim-ai:sdd-enforce audit` or `/maxim-ai:sdd-enforce apply`. You can also
+ask in your own words, for example "Set up sdd-enforce in this repo". During Apply the skill also does the parts
+that a script cannot guess. It sets the folders that hold application code, moves old-format docs, and tells you
+how to wire Git hooks and CI.
 
 **Directly from a terminal.** Same result, you drive it.
 

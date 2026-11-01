@@ -192,6 +192,15 @@ test('skill metadata is discoverable and matches its directory', () => {
   assert.match(readFileSync(join(SKILL_ROOT, 'agents', 'openai.yaml'), 'utf8'), new RegExp(`\\$${SKILL_NAME}\\b`));
 });
 
+test('run with no arguments, the skill offers a menu of audit, apply, verify, and remove', () => {
+  const body = readFileSync(join(SKILL_ROOT, 'SKILL.md'), 'utf8');
+  assert.match(body, /^argument-hint: "\[audit \| apply \| verify \| remove\] \[repo path\]"$/m);
+  assert.match(body, /^Arguments: `\$ARGUMENTS`$/m);
+  const options = [...body.matchAll(/^\s*\| (Audit \(Recommended\)|Apply SDD|Verify|Remove) \|/gm)].map((match) => match[1]);
+  assert.deepEqual(options, ['Audit (Recommended)', 'Apply SDD', 'Verify', 'Remove']);
+  assert.ok(body.split('\n').length < 500);
+});
+
 test('audit is read-only and reports a Git repository', () => {
   const root = fixture();
   const before = tree(root);

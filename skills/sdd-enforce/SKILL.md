@@ -1,6 +1,7 @@
 ---
 name: sdd-enforce
 description: Use when a repository needs one shared spec-driven development policy for Claude Code, Codex, and Cursor at once - missing or drifted agent instructions, rules/skills/hooks that no longer match across harnesses, absent docs-of-record or config gates, or an older sdd-enforce install to upgrade. Not for ordinary feature work inside an already governed repository.
+argument-hint: "[audit | apply | verify | remove] [repo path]"
 ---
 
 # SDD enforce: cross-agent SDD bootstrap
@@ -9,6 +10,35 @@ Create one tool-neutral SDD policy with thin Claude Code, Codex, and Cursor adap
 docs standard: `AGENTS.md` and never `CLAUDE.md`, kebab-case concern docs under `docs/`, docs of record instead of
 module `SPEC.md` files, and plans in the issue tracker. Use the bundled Node CLI for repeatable discovery and file
 generation; use agent judgment for target-specific ownership, hook, and CI integration.
+
+## Start
+
+Arguments: `$ARGUMENTS`
+
+1. **Pick the action.** Read the first word of the arguments line above.
+   - `audit`, `apply`, `verify`, or `remove` (also `uninstall`): take that action. A second word is the target
+     repository path. Without it, the target is the Git root of the current folder.
+   - Nothing (the line is empty or still shows the literal placeholder), or any other word: show the menu and
+     wait for the answer. In Claude Code, ask one single-select question with the question tool, "What should
+     sdd-enforce do in this repository?", with these options in this order:
+
+     | Option | Description |
+     |---|---|
+     | Audit (Recommended) | Report what the repository has, the suggested profiles, and what the gates would fail on. Changes nothing. |
+     | Apply SDD | Install or upgrade the policy: audit, plan, and write only after your OK. |
+     | Verify | Check that the installed files are intact and that both gates are green. Changes nothing. |
+     | Remove | Uninstall: list what goes, and delete only after your explicit yes. |
+
+     In other agents, ask the same question as a numbered list.
+
+   Done when you know the action and the target repository.
+2. **Run the action.**
+   - **Audit**: run steps 1 and 2 of the required flow, then run `plan` (read-only). Report what exists, whether
+     an older sdd-enforce version is installed, the suggested profiles, each old-format item with its action, and
+     each `plan` conflict. End by offering Apply. Done when the report is in the reply and nothing was written.
+   - **Apply SDD**: run the required flow below. On a repository with an older install, apply is the upgrade.
+   - **Verify**: run `verify <repo>`. Report each failing line with its fix. Done when the report is in the reply.
+   - **Remove**: follow [Removal](#removal).
 
 ## Required flow
 
