@@ -520,7 +520,8 @@ test('a staged runtime edit needs a covering doc of record or a concrete Doc-Imp
   writeFileSync(messagePath, 'feat: add feature\n', 'utf8');
   let checked = gate(root, ['--staged', '--commit-msg', messagePath]);
   assert.notEqual(checked.status, 0);
-  assert.match(checked.stderr, /runtime paths lack an owner change: src\/feature\.js \(owner: none found/);
+  // A repo with no workspace: the root AGENTS.md is the owner when no doc holds the file.
+  assert.match(checked.stderr, /runtime paths lack an owner change: src\/feature\.js \(owner: AGENTS\.md\)/);
 
   writeFileSync(messagePath, 'feat: add feature\n\nDoc-Impact: none - refactor only in src/feature.js with no behavior change at all\n', 'utf8');
   checked = gate(root, ['--staged', '--commit-msg', messagePath]);
@@ -1168,6 +1169,63 @@ test('no template, skill doc or reference names an organization', () => {
   };
   for (const path of roots) if (existsSync(path)) visit(path);
   assert.deepEqual(offenders, []);
+});
+
+test('frontmatter values with quotes and apostrophes read as YAML, and an accepted ADR supersedes nothing [@invariant sdd-enforce.gates:V21]', () => {
+  const root = installed();
+  const write = (path, body) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body, 'utf8');
+  };
+  write('docs/research/cache.md', "---\ndate: 2026-01-01\nquestion: Why doesn't the cache refresh?\n---\n\n# Cache\n\nThe TTL is fixed.\n\n## Findings\n\n- One TTL.\n\n## Not covered\n\n- Load.\n");
+  write('docs/adr/0001-a.md', '---\nstatus: "superseded by ADR-0002 (the bff\'s cache, 2026-01-01)"\n---\n\n# A\n\nDecided 2026-01-01 (T-1).\n');
+  write('docs/adr/0002-b.md', "---\nstatus: 'accepted (it''s the cache, see ADR-0003)'\n---\n\n# B\n\nDecided 2026-01-02 (T-2). It replaces ADR-0001.\n");
+  // An accepted ADR may name another in its note; that names no superseding ADR.
+  write('docs/adr/0003-c.md', "---\nstatus: 'accepted'\n---\n\n# C\n\nDecided 2026-01-03 (T-3).\n");
+  const checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('in a repo with no workspace the root AGENTS.md owns a runtime file that no doc holds [@invariant sdd-enforce.gates:V18]', () => {
+  const root = installed();
+  writeFileSync(join(root, 'src', 'index.js'), 'export const index = 1;\n', 'utf8');
+  writeFileSync(join(root, 'AGENTS.md'), `${readFileSync(join(root, 'AGENTS.md'), 'utf8')}\n- index exports 1.\n`, 'utf8');
+  git(root, ['add', 'src/index.js', 'AGENTS.md']);
+  const messagePath = join(root, '.git', 'TEST_COMMIT_MSG');
+  writeFileSync(messagePath, 'feat: export 1\n', 'utf8');
+  const checked = gate(root, ['--staged', '--commit-msg', messagePath]);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('check-sdd skips a SPEC.md and an @spec citation under test fixtures, as the audit does [@invariant sdd-enforce.gates:V1]', () => {
+  const root = installed();
+  mkdirSync(join(root, 'evals', 'case'), { recursive: true });
+  writeFileSync(join(root, 'evals', 'case', 'SPEC.md'), '---\nid: case.old\n---\n\nV1: Old.\n', 'utf8');
+  writeFileSync(join(root, 'evals', 'case', 'old.test.js'), "test('old [@spec case.old:V1]', () => {});\n", 'utf8');
+  const checked = gate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('the shipped skills name the code: owner model and hold no $<digit> that Claude Code would replace', () => {
+  const offenders = [];
+  const visit = (path) => {
+    if (statSync(path).isDirectory()) for (const name of readdirSync(path)) visit(join(path, name));
+    else if (path.endsWith('SKILL.md')) {
+      const body = readFileSync(path, 'utf8');
+      if (/covers:/.test(body)) offenders.push(`${relative(SKILL_ROOT, path)}: covers:`);
+      // Claude Code replaces $1, $2 ... in a SKILL.md before the model reads it; a literal one is written \$1.
+      if (/(?<!\\)\$\d/.test(body)) offenders.push(`${relative(SKILL_ROOT, path)}: $<digit>`);
+    }
+  };
+  visit(join(SKILL_ROOT, 'assets'));
+  assert.deepEqual(offenders, []);
+  const commit = readFileSync(join(SKILL_ROOT, 'assets', 'repository', '_claude', 'skills', 'commit-changes', 'SKILL.md'), 'utf8');
+  assert.match(commit, /longest `code:` folder/);
+  assert.match(commit, /docs\/README\.md|`README\.md` index/);
+  // Look-ups stay looked up: the commit linter config and the gates hold their own limits and checks.
+  assert.doesNotMatch(commit, /hard cap 72|at most 100\s+characters|feat fix docs style/);
+  const parityRule = readFileSync(join(SKILL_ROOT, 'assets', 'repository', '_claude', 'rules', 'agent-parity.md'), 'utf8');
+  assert.doesNotMatch(parityRule, /gate rejects|gen-cursor-rules\.mjs` after/);
 });
 
 test('a people-started skill has an imperative name and disable-model-invocation, a model skill a trigger-first description', () => {

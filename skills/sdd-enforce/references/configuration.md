@@ -74,8 +74,7 @@ Ownership of a runtime file (`Doc-Impact` gate):
 | Case | Owner |
 |---|---|
 | A doc of record has a `code:` folder that holds the file | the doc with the longest such folder |
-| No doc matches, root is `apps`, `packages`, `services`, or `modules` | `<root>/<workspace>/AGENTS.md` |
-| No doc matches, other root (`src`) | `<root>/AGENTS.md` |
+| No doc holds the file | the nearest `AGENTS.md` above it, ending at the root `AGENTS.md` (the one owner in a repo with no workspace) |
 
 Runtime file = under a runtime root, runtime extension, not a test (`*.test.*`, `*.spec.*`, `__tests__/`,
 `test/`, `tests/`), not `*.d.ts`, not under `docs/`.

@@ -14,8 +14,8 @@ asked for that action. Commit preparation never allows a push, a pull request, a
 - **Stage each path by name.** Never `git add -A` or `git add .`.
 - **Report a failure, never hide it.** Never edit a file to make a test, lint, gate or chart check pass.
 - **Never `--no-verify`, never amend.** Fix a failed commit and commit again as a new commit.
-- **Use Conventional Commits**: `<type>(<scope>): <description>`, with the types `feat fix docs style
-  refactor perf test build ci chore revert`.
+- **Use Conventional Commits**: `<type>(<scope>): <description>`. The types and limits are in the
+  repository's commit linter config, when it has one.
 - **Commit to a topic branch.** If HEAD is on a shared branch (`main`, `develop`), create a topic branch
   first, unless the user said otherwise.
 - **Use `git -C <path>`** instead of `cd <path> && git ...`. Commands you give the user use the user's shell.
@@ -129,16 +129,15 @@ For each change group:
 
 - **No behavior change**: nothing to read. Write the reason for the `Doc-Impact` trailer in step 5 if no
   owner is in the commit set.
-- **Behavior changed**: the owner must be in the commit set. The owners are the docs of record whose
-  `covers:` matches the runtime file, else the workspace `AGENTS.md`. If no owner is in the set, `grep -n`
+- **Behavior changed**: the owner must be in the commit set. The owner is the doc of record with the
+  longest `code:` folder that holds the runtime file, else the nearest `AGENTS.md` above it. If no owner is in the set, `grep -n`
   the owner for the changed symbols or behaviors. Read only the matching lines with context. Edit only a
   real gap and add the doc to the commit set. Follow [doc of record](../../../docs/doc-of-record.md) for the
   shape.
 
 Never read a large `AGENTS.md` or doc of record whole for this step. Touch the root docs (`README.md`, the
 root `AGENTS.md`) only when the change adds a doc, module, script, command or config key. A new module with
-no doc of record: write one and link it from the workspace `AGENTS.md` in this commit, or
-`scripts/check-docs.mjs` fails. Doc edits go in the **same** commit as the code, because a second `docs:`
+no doc of record: write one and add its row to the `README.md` index of its `docs/` folder in this commit. Doc edits go in the **same** commit as the code, because a second `docs:`
 commit runs the whole hook again.
 
 Done when each behavior change has its owner in the commit set, or a `Doc-Impact` reason.
@@ -156,26 +155,23 @@ If a gate fails, write the missing doc or fix its shape. Never delete the link o
 Write a Conventional Commits message from the session's changes. Keep it short and exact, and say why more
 than what.
 
-- **Subject**: `<type>(<scope>): <imperative summary>`, in the imperative (`add`, `fix`, not `added`), at
-  most 50 characters (hard cap 72), with no period at the end. The scope is the workspace when every change
+- **Subject**: `<type>(<scope>): <imperative summary>`, in the imperative (`add`, `fix`, not `added`), short,
+  with no period at the end. The scope is the workspace when every change
   is inside one. The type is `feat` for any new feature, `fix` for bugs only, else the type of most
   changes. A breaking change gets `!` after the scope and a `BREAKING CHANGE:` line in the body.
 - **Body**: only when the subject does not explain the change: the reason that is not obvious, migration
-  notes, several changes in one commit. Use `-` bullets with lines of at most 100 characters, wrapped by
-  hand. Always write a body for breaking changes, security fixes, data migrations and reverts.
+  notes, several changes in one commit. Use `-` bullets, wrapped by hand to the line limit of the commit linter. Always write a body for breaking changes, security fixes, data migrations and reverts.
 - **Words to leave out**: "This commit", "I", "we", "now", "currently", "as requested by", emoji, the file
   name that the scope already says, and any AI attribution except the `Co-Authored-By` trailer.
 - **Gate trailers**: the commit-msg hook checks them with `node scripts/check-sdd.mjs --staged`, and CI
   checks them with `--changed`.
-  - A runtime file staged without its owner needs
-    `Doc-Impact: none - <at least 8 words that name each file and say why behavior cannot change>`. The gate
-    rejects generic words (refactor, cleanup, no behavior change). Name **each** such file, by its file name
-    or a folder on its path.
+  - A runtime file staged without its owner needs `Doc-Impact: none - <reason>`. The reason names **each**
+    such file and says why its behavior cannot change. The gate message gives the rest.
   - A harness file changed without its partner needs `Agent-Parity: none - <reason that names each file>`.
     Prefer to change the partner ([agent parity](../../../docs/agent-parity.md)).
   - `.agent-sdd/waivers.json` is for commits already on a shared branch only.
-- **Line limits**: the header and every body and footer line, trailers included, are at most 100
-  characters. A trailer that names several files does not fit on one line. Fold it: continue on the next
+- **Line limits**: the commit linter limits every line, trailers included. A trailer that names several files
+  may not fit on one line. Fold it: continue on the next
   lines with one leading space, like a Git trailer. `check-sdd` joins the folded lines.
 
   ```text

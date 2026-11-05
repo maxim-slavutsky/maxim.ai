@@ -10,7 +10,7 @@ paths:
 The mechanism and each rule in full: [doc of record](../../docs/doc-of-record.md).
 
 - **Read the doc of record whose `code:` folder holds the file before you edit it**, and the docs of the folders above it, because they hold invariants the code does not show.
-- **Update that doc in the same commit when behavior, an interface or an invariant changes**, or add `Doc-Impact: none - <reason>`.
+- **Update that doc in the same commit when behavior, an interface or an invariant changes**, because no gate can tell a behavior change.
 - **Cite an invariant only from a test that proves all of it**, with `@invariant <id>:V<n>`.
 - **Write the doc of record and its index row before non-trivial work in a module no doc holds**, from the owner's intent, not from the code.
 - **Put open work and bugs in the issue tracker**, because the doc states the current code only.

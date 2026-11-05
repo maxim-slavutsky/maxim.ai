@@ -7,12 +7,11 @@
  * as in the audit. docs/map.md is outside the migration checks: it names the old homes on purpose.
  */
 import { basename, dirname, posix } from 'node:path';
-import { docOfRecord, frontmatter, frontmatterList, frontmatterScalar, matchesGlob } from './sdd-lib.mjs';
+import { FIXTURE_DIR, docOfRecord, frontmatter, frontmatterList, frontmatterScalar, matchesGlob } from './sdd-lib.mjs';
 
 const MAX_AGENTS_LINES = 200;
 const MAX_SKILL_LINES = 500;
 const MAX_DESCRIPTION = 1024;
-const FIXTURE_DIR = /(?:^|\/)(?:evals|fixture|fixtures|__fixtures__|testdata)\//;
 const MIGRATION_EXEMPT = ['docs/map.md'];
 
 /**
@@ -159,6 +158,8 @@ function adrProblems(files, read) {
       out.push(`${path}: status "${status}" is not a standard form. Use 'accepted', 'superseded by ADR-NNNN (<what>, <date>)' or 'superseded in part by ADR-NNNN (<what>, <date>)', several joined with " and ".`);
       continue;
     }
+    // Only a superseded status names a superseding ADR. An accepted ADR may name others in its note.
+    if (!status.startsWith('superseded')) continue;
     const number = path.match(ADR_FILE)[1];
     for (const [, later] of status.matchAll(/ADR-(\d{4})/g)) {
       const laterPath = adrs.find((item) => item.match(ADR_FILE)[1] === later && dirname(item) === dirname(path));

@@ -12,7 +12,7 @@ paths:
 
 The partner rules in full: [agent parity](../../docs/agent-parity.md).
 
-- **Run `node scripts/gen-cursor-rules.mjs` after a rule edit and commit both files**, because the gate rejects a stale `.mdc`.
-- **Give every new rule or skill its `.agents/skills/<name>/` adapter with `agents/openai.yaml`**, so Codex and Cursor find it.
-- **Change all enabled hook configs together**, because each agent must run the same reminder.
-- **Add `Agent-Parity: none - <reason>` when one side changes alone**, naming each file.
+- **Keep an adapter a pointer to its source**, because no gate can tell that two texts mean the same.
+- **Name a rule or skill by its scope, not by an incident**, so the next reader finds it by guessing.
+- **Make a path-scoped constraint a rule and a procedure someone starts a skill**, and let the skill link the rules it applies.
+- **Change the partner files in the same commit before you reach for a trailer**: the partner table is in the concern doc.

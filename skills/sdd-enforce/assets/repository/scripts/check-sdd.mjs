@@ -15,7 +15,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cursorRulesProblems } from './gen-cursor-rules.mjs';
-import { DOC_ID, declaredHomes, docOfRecord, frontmatter, frontmatterList, normalize, ownerDoc, skipRules, walkFiles } from './sdd-lib.mjs';
+import { DOC_ID, FIXTURE_DIR, declaredHomes, docOfRecord, frontmatter, frontmatterList, normalize, ownerDoc, skipRules, walkFiles } from './sdd-lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_PATH = join(ROOT, '.agent-sdd', 'config.json');
@@ -127,7 +127,8 @@ const CITATION_EXTENSIONS = ['.cjs', '.go', '.java', '.js', '.jsx', '.kt', '.md'
 const isTestFile = (key) => /(?:^|\/)(?:__tests__\/|[^/]+\.(?:spec|test)\.[^/]+$)/.test(key);
 
 function checkDocsOfRecord() {
-  for (const path of files((item) => basename(item) === 'SPEC.md')) {
+  // Test fixtures hold old forms on purpose; the docs audit leaves them out, and so do these checks.
+  for (const path of files((item) => basename(item) === 'SPEC.md' && !FIXTURE_DIR.test(rel(item)))) {
     fail(
       `${rel(path)}: a module doc is no longer a SPEC.md. Move it to <workspace>/docs/<module>.md, add a "code:" folder for the code it owns, ` +
         `and drop the Tasks, Bugs and Files tables (shape in ${DOC_RULES}).`,
@@ -181,7 +182,7 @@ function checkDocsOfRecord() {
   }
 
   const evidence = new Set();
-  for (const path of files((item) => CITATION_EXTENSIONS.includes(extname(item).toLowerCase()))) {
+  for (const path of files((item) => CITATION_EXTENSIONS.includes(extname(item).toLowerCase()) && !FIXTURE_DIR.test(rel(item)))) {
     const key = rel(path);
     const body = normalize(readFileSync(path, 'utf8'));
     for (const match of body.matchAll(/@spec\s+([a-z0-9]+(?:[.-][a-z0-9]+)*):(V\d+)\b/g)) {
@@ -453,15 +454,6 @@ function isRuntimeFile(path) {
   return runtimeExtensions.has(extname(path).toLowerCase());
 }
 
-function workspaceRoot(path, runtimeRoot) {
-  const rootParts = runtimeRoot.split('/');
-  const parts = path.split('/');
-  if (['apps', 'packages', 'services', 'modules'].includes(rootParts.at(-1)) && parts.length > rootParts.length) {
-    return parts.slice(0, rootParts.length + 1).join('/');
-  }
-  return runtimeRoot;
-}
-
 /** The owner of a runtime file: the doc of record with the longest "code:" folder that holds it, else the workspace AGENTS.md. */
 let docsCache = null;
 function ownersFor(path) {
@@ -473,8 +465,14 @@ function ownersFor(path) {
     .filter(Boolean);
   const doc = ownerDoc(path, docsCache);
   if (doc) return [doc.path];
-  const agents = `${workspaceRoot(path, runtimeRoot)}/AGENTS.md`;
-  return existsSync(join(ROOT, agents)) ? [agents] : [];
+  // The nearest AGENTS.md above the file, ending at the root: in a repo with no workspace the root is the one.
+  let folder = dirname(path);
+  while (true) {
+    const agents = folder === '.' ? 'AGENTS.md' : `${folder}/AGENTS.md`;
+    if (existsSync(join(ROOT, agents))) return [agents];
+    if (folder === '.') return [];
+    folder = dirname(folder);
+  }
 }
 
 /**

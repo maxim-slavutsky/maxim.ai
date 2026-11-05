@@ -63,7 +63,8 @@ V1: A doc of record is a Markdown file directly under a `docs/` folder whose fro
 It needs both. `code:` names one folder that holds a file, read with forward slashes and without a trailing
 slash. A doc in `<workspace>/docs/` owns a folder of that workspace only. Two docs never name one folder. A
 `Tasks`, `Bugs`, `§T` or `§B` heading fails. Any `SPEC.md` and any `@spec <id>:V<n>` fail, and the message names
-the new form.
+the new form, except under test fixture folders (`evals/`, `fixture/`, `fixtures/`, `__fixtures__/`,
+`testdata/`). Frontmatter values read as YAML scalars: plain, single-quoted or double-quoted.
 
 V2: For each `.claude/rules/<n>.md` except `INDEX.md`, `.cursor/rules/<n>.mdc` equals the output of
 `scripts/gen-cursor-rules.mjs`. A stale, missing or stray `.mdc` fails the gate. A legacy `INDEX.md` is no rule:
@@ -145,7 +146,7 @@ the rule globs that match a file once apply has run. A rule with no such glob is
 adapter or the concern doc line that links it. Plan lists the rule under "Not written".
 
 V18: The owner of a runtime file is the doc of record with the longest `code:` folder that holds the file, else
-the workspace `AGENTS.md`. A parent doc does not own a file that a doc of a folder inside it holds. A commit that
+the nearest `AGENTS.md` above the file, ending at the root `AGENTS.md`. A parent doc does not own a file that a doc of a folder inside it holds. A commit that
 changes the file and not its owner needs a `Doc-Impact: none -` reason of 8 words or more.
 The reason names each such file and is not generic. `Spec-Impact:` is accepted as the same trailer.
 
@@ -162,7 +163,8 @@ files Git ignores never hit.
 
 V21: `scripts/check-docs.mjs` fails on an ADR under `docs/adr/` without a `status:` in one of the standard's forms
 (`accepted`, `superseded by …` or `superseded in part by …`, several ADRs joined with " and "), on a status that
-names an ADR that does not exist, and on a superseding ADR that does not name the old one: as `ADR-0005`,
+names an ADR that does not exist, and on a superseding ADR that does not name the old one (a superseded status
+only: an `accepted` note names no superseding ADR): as `ADR-0005`,
 `ADR 5`, a link to its file, or its decision id `D5` or `§D5`. It fails on a research note without `date:`,
 `question:`, `## Findings` or `## Not covered`, and on an open check box outside a fenced block in a doc of
 record. A checklist in another doc is a procedure and passes. It fails on an API contract that no `AGENTS.md`

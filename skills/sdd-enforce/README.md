@@ -200,7 +200,7 @@ the diff, wire the gates (see [Gate reference](#gate-reference)), then commit it
   each `docs/` folder lists its docs of record, and the nearest `AGENTS.md` links that index. The
   `check-docs` gate stops a commit that breaks this.
 - **Change the code, change its doc.** The owner of a runtime file is the doc of record with the longest
-  `code:` folder that holds it. When no doc holds it, the owner is the workspace `AGENTS.md`. When a commit
+  `code:` folder that holds it. When no doc holds it, the owner is the nearest `AGENTS.md` above it. When a commit
   changes a runtime file and not its owner, the gate stops the commit. The message must then explain why:
   `Doc-Impact: none - <at least 8 words naming the files and why behavior cannot change>`. A long reason can
   fold over several lines. Start each continuation line with one space, like a Git trailer.
@@ -362,7 +362,7 @@ Every message ends with what to do. The most frequent ones:
 
 | Message contains | Meaning | Fix |
 |---|---|---|
-| `runtime paths lack an owner change` | You changed code but none of its owners: no doc of record that covers it and no workspace `AGENTS.md`. | Update an owner in the same commit. Or add `Doc-Impact: none - <8+ words naming the files and why>` to the commit message. |
+| `runtime paths lack an owner change` | You changed code but none of its owners: no doc of record that holds it and no `AGENTS.md` above it. | Update an owner in the same commit. Or add `Doc-Impact: none - <8+ words naming the files and why>` to the commit message. |
 | `rejected Doc-Impact trailer` | The `none -` reason is too short or too generic, or it does not name the files. | Rewrite the reason. Name each file, say what changed, and say why behavior cannot change. |
 | `critical invariant lacks executable evidence` | An invariant under `critical:` has no test that cites it. | Add `@invariant <id>:V<n>` to a real test that proves the whole invariant. Or ask the owner of the doc to split the invariant or drop `critical`. Never cite a partial test. |
 | `harness paths lack partner change` | A Claude, Codex, or Cursor file changed alone. | Change the partner files too, or add `Agent-Parity: none - <reason>`. |
@@ -372,7 +372,7 @@ Every message ends with what to do. The most frequent ones:
 | `is the citation form before 1.0.0` | A test or doc still cites `@spec <id>:V<n>`. | Write `@invariant <id>:V<n>` instead. |
 | `does not belong in a doc of record` | A doc of record has a Tasks or Bugs section. | Move open work and bugs to the issue tracker and delete the section. |
 | `missing AGENTS.md: <folder>` (`check-docs`) | An app or package folder has no `AGENTS.md`. | Write one with its gotchas and links to its docs of record. |
-| `module not covered: <folder>` (`check-docs`) | No doc of record covers a module folder under `moduleRoots`. | Write the doc per `docs/doc-of-record.md` and link it from the workspace `AGENTS.md`, in the same commit. |
+| `module not covered: <folder>` (`check-docs`) | No doc of record covers a module folder under `moduleRoots`. | Write the doc per `docs/doc-of-record.md` and add its row to the `README.md` index of its `docs/` folder, in the same commit. |
 | `AGENTS.md does not link docs/doc-of-record.md` (`check-docs`) | The pointer line was removed from the root `AGENTS.md`. | Put the line back. Without it, agents skip the docs of record. |
 | `the repository ships AGENTS.md, never CLAUDE.md` (`check-docs`) | A `CLAUDE.md` is in the repository. | Move each line that `AGENTS.md` lacks into the `AGENTS.md` beside it. Then delete the `CLAUDE.md`. |
 | `a doc under docs/ needs a kebab-case name` (`check-docs`) | A doc under `docs/` has capital letters or underscores in its name. | Run the `git mv` command that the message shows, then update every link. |
@@ -427,7 +427,7 @@ What you move by hand: there is no migrate command, because moving prose and tab
 
 | Item | What to do |
 |---|---|
-| `SPEC.md` | Move it to `<workspace>/docs/<module>.md`. Keep its `id` and its invariant numbers, because tests cite them. Add a `code:` folder and a row in the index of its `docs/` folder. Use the headings Goal, Constraints, Interfaces, and Invariants, in plain prose. Drop the Tasks, Bugs, and Files tables, and move open work and bugs to the issue tracker. Link the new doc from the workspace `AGENTS.md`. |
+| `SPEC.md` | Move it to `<workspace>/docs/<module>.md`. Keep its `id` and its invariant numbers, because tests cite them. Add a `code:` folder and a row in the index of its `docs/` folder. Use the headings Goal, Constraints, Interfaces, and Invariants, in plain prose. Drop the Tasks, Bugs, and Files tables, and move open work and bugs to the issue tracker. |
 | `@spec <id>:V<n>` in a test or a doc | Rewrite it as `@invariant <id>:V<n>`. |
 | `CLAUDE.md` | Move each line that `AGENTS.md` lacks into the `AGENTS.md` beside it. Then delete the file. An `@AGENTS.md` line moves nowhere. |
 | A doc under `docs/` with a name that is not kebab-case | Rename it with `git mv` and update every link. |

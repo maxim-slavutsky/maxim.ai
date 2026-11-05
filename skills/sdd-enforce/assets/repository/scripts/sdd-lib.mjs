@@ -90,9 +90,36 @@ export function frontmatter(body) {
   return text.slice(4, end);
 }
 
+/**
+ * A scalar value as YAML reads it: plain, single-quoted ('' is one quote) or double-quoted (backslash escapes).
+ * A quote inside a plain value stays, so "Why doesn't it refresh?" reads whole. Null when the key is absent.
+ */
 export function frontmatterScalar(block, key) {
-  return block.match(new RegExp(`^${key}:[ \\t]*['"]?([^'"\\n]*?)['"]?[ \\t]*$`, 'm'))?.[1] ?? null;
+  const raw = block.match(new RegExp(`^${key}:[ \\t]*(.*?)[ \\t]*$`, 'm'))?.[1];
+  if (raw === undefined) return null;
+  const quote = raw[0];
+  if (quote !== "'" && quote !== '"') return raw;
+  let out = '';
+  for (let index = 1; index < raw.length; index += 1) {
+    const character = raw[index];
+    if (quote === "'" && character === "'") {
+      if (raw[index + 1] !== "'") return out;
+      out += "'";
+      index += 1;
+    } else if (quote === '"' && character === '\\') {
+      out += raw[index + 1] ?? '';
+      index += 1;
+    } else if (quote === '"' && character === '"') {
+      return out;
+    } else {
+      out += character;
+    }
+  }
+  return out; // An unclosed quote: the rest of the line.
 }
+
+/** Test fixtures sit outside the docs checks, as in the docs audit. */
+export const FIXTURE_DIR = /(?:^|\/)(?:evals|fixture|fixtures|__fixtures__|testdata)\//;
 
 /** Items of a YAML block list (`key:` then `  - item` lines); null when the key is absent. */
 export function frontmatterList(block, key) {
