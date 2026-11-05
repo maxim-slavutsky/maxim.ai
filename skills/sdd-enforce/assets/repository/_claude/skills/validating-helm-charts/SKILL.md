@@ -1,6 +1,6 @@
 ---
 name: validating-helm-charts
-description: Validate changed or selected Helm charts with helm lint, helm template, and kubeconform before committing or deploying a chart change; report failures without rewriting charts.
+description: Use before committing or deploying a change to a Helm chart, or when asked to validate charts. Runs helm lint, helm template and kubeconform on the changed or selected charts, and reports failures without rewriting charts.
 ---
 
 # Validating Helm charts
@@ -75,7 +75,7 @@ collapses long tool output, so it hides a summary at the end. You write the summ
 if ! command -v helm >/dev/null 2>&1; then echo "helm is not installed: cannot validate charts"; exit 1; fi
 FAILED=0
 for chart_dir in $charts; do
-  release=$(helm show chart "$chart_dir" | awk '/^name:/ {print $2}')
+  release=$(helm show chart "$chart_dir" | awk '/^name:/ {print $NF}')
   echo; echo "=== Validating: $chart_dir ($release) ==="
   lint_output=$(helm lint "$chart_dir" 2>&1) || { echo "  [1/3] lint        FAILED"; echo "$lint_output"; FAILED=1; continue; }
   echo "  [1/3] lint        OK"

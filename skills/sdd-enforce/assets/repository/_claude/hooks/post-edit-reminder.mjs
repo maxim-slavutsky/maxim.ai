@@ -40,7 +40,7 @@ function main() {
   if (!paths.length) return;
   const context =
     `You edited ${paths.join(', ')}. Before you finish this task: ` +
-    '(1) if behavior, an interface or an invariant changed, update every doc of record whose covers: matches ' +
+    '(1) if behavior, an interface or an invariant changed, update the doc of record whose code: folder holds ' +
     'these files, and the test that cites the invariant with @invariant <id>:V<n>; ' +
     '(2) if no owner doc changes, plan the commit trailer "Doc-Impact: none - <reason that names each file>"; ' +
     '(3) run "node scripts/check-sdd.mjs" and fix what it reports.';

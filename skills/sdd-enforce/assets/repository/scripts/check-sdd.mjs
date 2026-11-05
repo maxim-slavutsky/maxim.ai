@@ -15,7 +15,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cursorRulesProblems } from './gen-cursor-rules.mjs';
-import { DOC_ID, docOfRecord, matchesGlob, normalize, skipRules, walkFiles } from './sdd-lib.mjs';
+import { DOC_ID, FIXTURE_DIR, declaredHomes, docOfRecord, frontmatter, frontmatterList, normalize, ownerDoc, skipRules, walkFiles } from './sdd-lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_PATH = join(ROOT, '.agent-sdd', 'config.json');
@@ -114,7 +114,7 @@ function checkDocs() {
     if (key === 'AGENTS.md') continue;
     const kind = basename(path) === 'AGENTS.md' ? 'AGENTS.md' : docOfRecord(key, readFileSync(path, 'utf8')) ? 'doc of record' : null;
     if (kind && !inbound.has(key)) {
-      fail(`unreachable ${kind}: ${key}. No other Markdown file links to it, so people and agents cannot find it. Add a link from the nearest AGENTS.md or README.md.`);
+      fail(`unreachable ${kind}: ${key}. No other Markdown file links to it, so people and agents cannot find it. Link an AGENTS.md from its parent AGENTS.md or README.md, and list a doc of record in the README.md of its docs/ folder.`);
     }
   }
 }
@@ -127,13 +127,15 @@ const CITATION_EXTENSIONS = ['.cjs', '.go', '.java', '.js', '.jsx', '.kt', '.md'
 const isTestFile = (key) => /(?:^|\/)(?:__tests__\/|[^/]+\.(?:spec|test)\.[^/]+$)/.test(key);
 
 function checkDocsOfRecord() {
-  for (const path of files((item) => basename(item) === 'SPEC.md')) {
+  // Test fixtures hold old forms on purpose; the docs audit leaves them out, and so do these checks.
+  for (const path of files((item) => basename(item) === 'SPEC.md' && !FIXTURE_DIR.test(rel(item)))) {
     fail(
-      `${rel(path)}: a module doc is no longer a SPEC.md. Move it to <workspace>/docs/<module>.md, add "covers:" globs for the files it owns, ` +
-        `use the long headings, and drop the Tasks, Bugs and Files tables (shape in ${DOC_RULES}).`,
+      `${rel(path)}: a module doc is no longer a SPEC.md. Move it to <workspace>/docs/<module>.md, add a "code:" folder for the code it owns, ` +
+        `and drop the Tasks, Bugs and Files tables (shape in ${DOC_RULES}).`,
     );
   }
   const docs = new Map();
+  const codeFolders = new Map();
   for (const path of files((item) => extname(item) === '.md')) {
     const key = rel(path);
     const body = normalize(readFileSync(path, 'utf8'));
@@ -142,18 +144,18 @@ function checkDocsOfRecord() {
     if (!doc.id || !DOC_ID.test(doc.id)) {
       fail(`missing or invalid stable id: ${key}. Add "id: <lowercase id, dots or dashes allowed>" to the frontmatter. Tests cite this id, so it never changes once set.`);
     }
-    if (!doc.hasCovers || !doc.covers.length) {
-      fail(`${key} has no "covers:" globs. List the files this doc of record owns, as globs relative to the repository root (${DOC_RULES}).`);
-    }
     const docsDir = dirname(key);
     const owner = docsDir === 'docs' ? '' : docsDir.slice(0, -'/docs'.length);
-    for (const glob of doc.covers) {
-      if (!allFiles.some((file) => matchesGlob(file, glob))) {
-        fail(`${key}: the "covers:" glob "${glob}" matches no file. Fix the glob or remove it.`);
-      }
-      if (owner && !String(glob).replace(/^\.?\//, '').startsWith(`${owner}/`)) {
-        fail(`${key}: the "covers:" glob "${glob}" is outside ${owner}. A doc in ${docsDir}/ covers files of that workspace only; move a doc that spans workspaces to the root docs/.`);
-      }
+    if (!doc.code) {
+      fail(`${key} has no "code:" folder. Name the one folder this doc of record owns, relative to the repository root (${DOC_RULES}).`);
+    } else if (!allFiles.some((file) => file.startsWith(`${doc.code}/`))) {
+      fail(`${key}: the "code:" folder "${doc.code}" does not exist. Fix the path, or move the doc together with its code.`);
+    } else if (owner && doc.code !== owner && !doc.code.startsWith(`${owner}/`)) {
+      fail(`${key}: the "code:" folder "${doc.code}" is outside ${owner}. A doc in ${docsDir}/ owns a folder of that workspace only; move it to the docs/ folder of the workspace that holds the code.`);
+    } else if (codeFolders.has(doc.code)) {
+      fail(`${codeFolders.get(doc.code)} and ${key} both claim the "code:" folder "${doc.code}". One folder has one doc of record: merge the two docs, or point one of them at a folder inside it.`);
+    } else {
+      codeFolders.set(doc.code, key);
     }
     const invariants = new Set();
     for (const match of body.matchAll(/^(?:-\s+)?(?:\*\*)?(V\d+)(?:\*\*)?:/gm)) {
@@ -180,7 +182,7 @@ function checkDocsOfRecord() {
   }
 
   const evidence = new Set();
-  for (const path of files((item) => CITATION_EXTENSIONS.includes(extname(item).toLowerCase()))) {
+  for (const path of files((item) => CITATION_EXTENSIONS.includes(extname(item).toLowerCase()) && !FIXTURE_DIR.test(rel(item)))) {
     const key = rel(path);
     const body = normalize(readFileSync(path, 'utf8'));
     for (const match of body.matchAll(/@spec\s+([a-z0-9]+(?:[.-][a-z0-9]+)*):(V\d+)\b/g)) {
@@ -217,15 +219,18 @@ function skillNames(base) {
   return readdirSync(base).filter((name) => existsSync(join(base, name, 'SKILL.md')) && !isSkippedPath(join(base, name)));
 }
 
-/** Repo-relative concern docs (Markdown directly under a docs/ folder) that `path` links. */
+// Folders that docs/map.md declares as an added home. A concern doc inside one of them counts as a concern doc.
+const MAP_PATH = join(ROOT, 'docs', 'map.md');
+const DECLARED_HOMES = existsSync(MAP_PATH) ? declaredHomes(readFileSync(MAP_PATH, 'utf8')) : [];
+
+/**
+ * Repo-relative concern docs that `path` links: Markdown directly under a docs/ folder, or directly under a docs/
+ * subfolder that docs/map.md declares.
+ */
 function concernDocLinks(path) {
-  return [
-    ...new Set(
-      markdownLinks(path)
-        .map((link) => rel(link.absolute))
-        .filter((target) => /(?:^|\/)docs\/[^/]+\.md$/.test(target)),
-    ),
-  ];
+  const isConcernDoc = (target) =>
+    /(?:^|\/)docs\/[^/]+\.md$/.test(target) || DECLARED_HOMES.some((home) => /^docs\//.test(home) && dirname(target) === home);
+  return [...new Set(markdownLinks(path).map((link) => rel(link.absolute)).filter(isConcernDoc))];
 }
 
 /**
@@ -283,6 +288,9 @@ function checkAgents() {
   const agents = new Set(config?.agents ?? []);
   const claudeSkills = new Set(skillNames(join(ROOT, '.claude', 'skills')));
   const sharedSkills = new Set(skillNames(join(ROOT, '.agents', 'skills')));
+  const rulesDir = join(ROOT, '.claude', 'rules');
+  // A legacy INDEX.md (rules index up to 0.4.0) is not a rule.
+  const claudeRules = existsSync(rulesDir) ? readdirSync(rulesDir).filter((name) => name.endsWith('.md') && name !== 'INDEX.md').map((name) => name.slice(0, -3)) : [];
   if (agents.has('claude') && (agents.has('codex') || agents.has('cursor'))) {
     for (const name of claudeSkills) {
       if (!sharedSkills.has(name)) {
@@ -293,6 +301,19 @@ function checkAgents() {
       if (!claudeSkills.has(name) && !existsSync(join(ROOT, '.claude', 'rules', `${name}.md`))) {
         fail(`.agents skill lacks Claude counterpart: ${name}. Create .claude/rules/${name}.md (for a path-scoped rule) or .claude/skills/${name}/SKILL.md (for a procedure someone starts).`);
       }
+    }
+    for (const name of claudeRules) {
+      if (!sharedSkills.has(name)) {
+        fail(`Claude rule lacks .agents counterpart: ${name}. Create .agents/skills/${name}/SKILL.md that links the rule's concern doc, plus agents/openai.yaml, so Codex and Cursor load the same rules (${PARITY_DOC}).`);
+      }
+    }
+  }
+  // A rule without "paths:" loads in every Claude Code session; a line every session needs belongs in AGENTS.md.
+  for (const name of claudeRules) {
+    const rule = `.claude/rules/${name}.md`;
+    const block = frontmatter(normalize(readFileSync(join(ROOT, rule), 'utf8')));
+    if (!(block && frontmatterList(block, 'paths')?.length)) {
+      fail(`${rule} has no "paths:", so it loads in every session. Add "paths:" globs for the files it governs, or move its lines into AGENTS.md and delete the rule.`);
     }
   }
   if (agents.has('codex')) {
@@ -433,16 +454,7 @@ function isRuntimeFile(path) {
   return runtimeExtensions.has(extname(path).toLowerCase());
 }
 
-function workspaceRoot(path, runtimeRoot) {
-  const rootParts = runtimeRoot.split('/');
-  const parts = path.split('/');
-  if (['apps', 'packages', 'services', 'modules'].includes(rootParts.at(-1)) && parts.length > rootParts.length) {
-    return parts.slice(0, rootParts.length + 1).join('/');
-  }
-  return runtimeRoot;
-}
-
-/** Owners of a runtime file: every doc of record whose "covers:" matches it, else the workspace AGENTS.md. */
+/** The owner of a runtime file: the doc of record with the longest "code:" folder that holds it, else the workspace AGENTS.md. */
 let docsCache = null;
 function ownersFor(path) {
   const runtimeRoot = runtimeRootFor(path);
@@ -451,10 +463,16 @@ function ownersFor(path) {
     .filter((key) => key.endsWith('.md'))
     .map((key) => docOfRecord(key, readFileSync(join(ROOT, key), 'utf8')))
     .filter(Boolean);
-  const docs = docsCache.filter((doc) => doc.covers.some((glob) => matchesGlob(path, glob))).map((doc) => doc.path);
-  if (docs.length) return docs;
-  const agents = `${workspaceRoot(path, runtimeRoot)}/AGENTS.md`;
-  return existsSync(join(ROOT, agents)) ? [agents] : [];
+  const doc = ownerDoc(path, docsCache);
+  if (doc) return [doc.path];
+  // The nearest AGENTS.md above the file, ending at the root: in a repo with no workspace the root is the one.
+  let folder = dirname(path);
+  while (true) {
+    const agents = folder === '.' ? 'AGENTS.md' : `${folder}/AGENTS.md`;
+    if (existsSync(join(ROOT, agents))) return [agents];
+    if (folder === '.') return [];
+    folder = dirname(folder);
+  }
 }
 
 /**
@@ -692,7 +710,8 @@ function checkChangeImpact(args) {
         if (waived.size) console.log(`check-sdd: waived ${commit.slice(0, 12)} for ${[...waived].join(', ')} (listed in .agent-sdd/waivers.json)`);
         if (waived.size === WAIVER_GATES.length) continue;
         const changedFiles = git([
-          'diff-tree', '--root', '--no-commit-id', '--name-only', '-r', '--diff-filter=ACMRD', commit,
+          // -M: a moved file is one path, its new one, as --staged sees it. Without it the old path reads as a change.
+          'diff-tree', '--root', '-M', '--no-commit-id', '--name-only', '-r', '--diff-filter=ACMRD', commit,
         ]).split('\n').filter(Boolean);
         impactProblems(changedFiles, git(['show', '-s', '--format=%B', commit]), `commit ${commit.slice(0, 12)}`, waived);
       }

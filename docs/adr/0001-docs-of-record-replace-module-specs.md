@@ -1,5 +1,5 @@
 ---
-status: 'accepted'
+status: 'superseded in part by ADR-0002 (code: replaces covers:, 2026-11-05)'
 ---
 
 # Docs of record replace module SPEC.md files

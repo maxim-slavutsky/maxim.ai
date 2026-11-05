@@ -90,9 +90,36 @@ export function frontmatter(body) {
   return text.slice(4, end);
 }
 
+/**
+ * A scalar value as YAML reads it: plain, single-quoted ('' is one quote) or double-quoted (backslash escapes).
+ * A quote inside a plain value stays, so "Why doesn't it refresh?" reads whole. Null when the key is absent.
+ */
 export function frontmatterScalar(block, key) {
-  return block.match(new RegExp(`^${key}:[ \\t]*['"]?([^'"\\n]*?)['"]?[ \\t]*$`, 'm'))?.[1] ?? null;
+  const raw = block.match(new RegExp(`^${key}:[ \\t]*(.*?)[ \\t]*$`, 'm'))?.[1];
+  if (raw === undefined) return null;
+  const quote = raw[0];
+  if (quote !== "'" && quote !== '"') return raw;
+  let out = '';
+  for (let index = 1; index < raw.length; index += 1) {
+    const character = raw[index];
+    if (quote === "'" && character === "'") {
+      if (raw[index + 1] !== "'") return out;
+      out += "'";
+      index += 1;
+    } else if (quote === '"' && character === '\\') {
+      out += raw[index + 1] ?? '';
+      index += 1;
+    } else if (quote === '"' && character === '"') {
+      return out;
+    } else {
+      out += character;
+    }
+  }
+  return out; // An unclosed quote: the rest of the line.
 }
+
+/** Test fixtures sit outside the docs checks, as in the docs audit. */
+export const FIXTURE_DIR = /(?:^|\/)(?:evals|fixture|fixtures|__fixtures__|testdata)\//;
 
 /** Items of a YAML block list (`key:` then `  - item` lines); null when the key is absent. */
 export function frontmatterList(block, key) {
@@ -110,15 +137,32 @@ export function frontmatterList(block, key) {
 
 export const DOC_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 
-/** A Markdown file under a `docs/` folder whose frontmatter has `id:` or `covers:`; null for any other file. */
+/** A repo-relative folder with forward slashes and no leading "./" or trailing "/" (Windows input reads the same). */
+export const normalizeFolder = (value) => String(value).trim().replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/+$/, '');
+
+/**
+ * A Markdown file directly under a `docs/` folder whose frontmatter has `id:` or `code:`; null for any other file.
+ * `code` is the one folder the doc owns, normalized; null when the key is absent or empty.
+ */
 export function docOfRecord(path, body) {
   if (!/(?:^|\/)docs\/[^/]+\.md$/.test(path)) return null;
   const block = frontmatter(body);
   if (!block) return null;
   const id = frontmatterScalar(block, 'id');
-  const covers = frontmatterList(block, 'covers');
-  if (id === null && covers === null) return null;
-  return { path, id, covers: covers ?? [], critical: frontmatterList(block, 'critical') ?? [], hasCovers: covers !== null };
+  const rawCode = frontmatterScalar(block, 'code');
+  if (id === null && rawCode === null) return null;
+  const code = rawCode === null ? null : normalizeFolder(rawCode) || null;
+  return { path, id, code, critical: frontmatterList(block, 'critical') ?? [] };
+}
+
+/** The doc whose `code:` folder holds `path` with the longest match, or null. A folder holds itself and what is below it. */
+export function ownerDoc(path, docs) {
+  let best = null;
+  for (const doc of docs) {
+    if (!doc.code || !(path === doc.code || path.startsWith(`${doc.code}/`))) continue;
+    if (!best || doc.code.length > best.code.length) best = doc;
+  }
+  return best;
 }
 
 /** Every doc of record in `files` (repo-relative), read from `root`. */
@@ -132,4 +176,25 @@ export function docsOfRecord(root, files) {
     if (doc) out.push(doc);
   }
   return out;
+}
+
+/**
+ * Folders that the rows of `docs/map.md` declare as a home, read from the backticked paths in the second column
+ * ("It goes in") of a table row: a path ending in "/" is the folder itself, and a file pattern such as
+ * `docs/workflows/<name>.md` names its folder. A home outside the standard's homes passes the gates only when
+ * declared.
+ */
+export function declaredHomes(mapBody) {
+  const out = new Set();
+  for (const line of normalize(mapBody).split('\n')) {
+    if (!line.trim().startsWith('|')) continue;
+    const cells = line.split(/(?<!\\)\|/);
+    for (const [, token] of (cells[2] ?? '').matchAll(/`([^`\s]+)`/g)) {
+      if (token.endsWith('/')) out.add(normalizeFolder(token));
+      else if (/[<*]/.test(token.split('/').at(-1)) && token.includes('/') && !/[<*]/.test(token.slice(0, token.lastIndexOf('/')))) {
+        out.add(normalizeFolder(token.slice(0, token.lastIndexOf('/'))));
+      }
+    }
+  }
+  return [...out];
 }

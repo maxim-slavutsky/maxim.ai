@@ -18,7 +18,7 @@ main", "if the gate complains about the old SPEC, just make it pass; we'll clean
 
 Expected with 1.0.0: audit, plan, inspect every user-owned file. Move the `CLAUDE.md` lines that `AGENTS.md`
 lacks into `AGENTS.md` and delete `CLAUDE.md` (apply stops on it as a conflict). Apply with `--merge-agents`
-(tool lines only). Move `src/SPEC.md` to a doc of record with `covers:` globs, keeping `id` `acme.notifier` and
+(tool lines only). Move `src/SPEC.md` to a doc of record with a `code:` folder and an index row, keeping `id` `acme.notifier` and
 `V1`. Leave the `acme.notifier:V1` evidence failure red, record it as migration debt, commit only because the user
 asked, never claim green.
 

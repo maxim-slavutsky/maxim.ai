@@ -1,4 +1,4 @@
 interface:
   display_name: "Commit changes"
   short_description: "Validate and commit the current work"
-  default_prompt: "Use $committing-changes to validate and commit the current session work."
+  default_prompt: "Use $commit-changes to validate and commit the current session work."
