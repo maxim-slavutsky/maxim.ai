@@ -119,12 +119,12 @@ function checkModules(docs) {
   for (const pattern of config?.moduleRoots ?? []) {
     for (const moduleRoot of expand(pattern)) {
       for (const module of directories(moduleRoot)) {
-        const prefix = `${rel(module)}/`;
-        const moduleFiles = allFiles.filter((path) => path.startsWith(prefix));
-        const covered = moduleFiles.some((path) => docs.some((doc) => doc.covers.some((glob) => matchesGlob(path, glob))));
+        // A parent doc does not cover a module: with it, one doc for "src" would cover every module.
+        const folder = rel(module);
+        const covered = docs.some((doc) => doc.code && (doc.code === folder || doc.code.startsWith(`${folder}/`)));
         if (!covered) {
           fail(
-            `module not covered: ${rel(module)}. Every module under "${pattern}" needs a doc of record whose "covers:" matches its files ` +
+            `module not covered: ${folder}. Every module under "${pattern}" needs a doc of record whose "code:" is that folder or a folder inside it ` +
               `(shape in ${DOC_RULES}); write it, or remove the folder from "moduleRoots" in .agent-sdd/config.json.`,
           );
         }

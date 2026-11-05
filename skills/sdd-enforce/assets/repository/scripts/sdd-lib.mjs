@@ -110,15 +110,32 @@ export function frontmatterList(block, key) {
 
 export const DOC_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 
-/** A Markdown file under a `docs/` folder whose frontmatter has `id:` or `covers:`; null for any other file. */
+/** A repo-relative folder with forward slashes and no leading "./" or trailing "/" (Windows input reads the same). */
+export const normalizeFolder = (value) => String(value).trim().replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/+$/, '');
+
+/**
+ * A Markdown file directly under a `docs/` folder whose frontmatter has `id:` or `code:`; null for any other file.
+ * `code` is the one folder the doc owns, normalized; null when the key is absent or empty.
+ */
 export function docOfRecord(path, body) {
   if (!/(?:^|\/)docs\/[^/]+\.md$/.test(path)) return null;
   const block = frontmatter(body);
   if (!block) return null;
   const id = frontmatterScalar(block, 'id');
-  const covers = frontmatterList(block, 'covers');
-  if (id === null && covers === null) return null;
-  return { path, id, covers: covers ?? [], critical: frontmatterList(block, 'critical') ?? [], hasCovers: covers !== null };
+  const rawCode = frontmatterScalar(block, 'code');
+  if (id === null && rawCode === null) return null;
+  const code = rawCode === null ? null : normalizeFolder(rawCode) || null;
+  return { path, id, code, critical: frontmatterList(block, 'critical') ?? [] };
+}
+
+/** The doc whose `code:` folder holds `path` with the longest match, or null. A folder holds itself and what is below it. */
+export function ownerDoc(path, docs) {
+  let best = null;
+  for (const doc of docs) {
+    if (!doc.code || !(path === doc.code || path.startsWith(`${doc.code}/`))) continue;
+    if (!best || doc.code.length > best.code.length) best = doc;
+  }
+  return best;
 }
 
 /** Every doc of record in `files` (repo-relative), read from `root`. */

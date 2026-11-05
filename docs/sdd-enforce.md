@@ -55,8 +55,9 @@ env: SDD_BASE_REF, CHANGE_TARGET, GIT_PREVIOUS_COMMIT, GIT_PREVIOUS_SUCCESSFUL_C
 
 ## Invariants
 
-V1: A doc of record is a Markdown file directly under a `docs/` folder whose frontmatter has `id:` or `covers:`.
-It needs both. Each `covers:` glob matches a file. A doc in `<workspace>/docs/` covers that workspace only. A
+V1: A doc of record is a Markdown file directly under a `docs/` folder whose frontmatter has `id:` or `code:`.
+It needs both. `code:` names one folder that holds a file, read with forward slashes and without a trailing
+slash. A doc in `<workspace>/docs/` owns a folder of that workspace only. Two docs never name one folder. A
 `Tasks`, `Bugs`, `§T` or `§B` heading fails. Any `SPEC.md` and any `@spec <id>:V<n>` fail, and the message names
 the new form.
 
@@ -133,8 +134,9 @@ V17: Apply sets the `paths:` of the doc-of-record rule to `<runtimeRoot>/**` for
 the rule globs that match a file once apply has run. A rule with no such glob is not written, nor is its `.agents`
 adapter or the concern doc line that links it. Plan lists the rule under "Not written".
 
-V18: The owners of a runtime file are the docs of record whose `covers:` matches it, else the workspace
-`AGENTS.md`. A commit that changes the file and no owner needs a `Doc-Impact: none -` reason of 8 words or more.
+V18: The owner of a runtime file is the doc of record with the longest `code:` folder that holds the file, else
+the workspace `AGENTS.md`. A parent doc does not own a file that a doc of a folder inside it holds. A commit that
+changes the file and not its owner needs a `Doc-Impact: none -` reason of 8 words or more.
 The reason names each such file and is not generic. `Spec-Impact:` is accepted as the same trailer.
 
 V19: Apply writes the tool's map rows between `<!-- sdd-enforce:start -->` and `<!-- sdd-enforce:end -->` in

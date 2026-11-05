@@ -92,9 +92,9 @@ function runtimeCommit(root, name, message) {
 }
 
 /** A doc of record at `relPath`, linked from the root AGENTS.md so both gates can reach it. */
-function writeDoc(root, relPath, { id, covers = ['src/**'], critical = [], body = '## Goal\n\nThe fixture exists.\n' }) {
+function writeDoc(root, relPath, { id, code = 'src', critical = [], body = '## Goal\n\nThe fixture exists.\n' }) {
   const lines = ['---', `id: ${id}`];
-  if (covers) lines.push('covers:', ...covers.map((glob) => `  - '${glob}'`));
+  if (code !== null) lines.push(`code: ${code}`);
   if (critical.length) lines.push('critical:', ...critical.map((item) => `  - ${item}`));
   lines.push('---', '', `# ${id}`, '', body);
   mkdirSync(dirname(join(root, relPath)), { recursive: true });
@@ -331,32 +331,71 @@ test('gate rejects stale Cursor mirror after Claude rule edit [@invariant sdd-en
   assert.match(checked.stderr, /\.cursor\/rules\/stray\.mdc has no source rule/);
 });
 
-test('a doc of record needs id and live covers, and holds no Tasks or Bugs [@invariant sdd-enforce.gates:V1]', () => {
+test('a doc of record needs id and one live code: folder inside its workspace [@invariant sdd-enforce.gates:V1]', () => {
   const root = installed();
   writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: '## Invariants\n\nV1: Fixture remains stable.\n\n## Tasks\n\nT1|.|later|V1\n' });
   let checked = gate(root);
   assert.notEqual(checked.status, 0);
   assert.match(checked.stderr, /docs\/core\.md: "## Tasks" does not belong in a doc of record/);
 
-  writeDoc(root, 'docs/core.md', { id: 'fixture.core', covers: null, body: '## Invariants\n\nV1: Fixture remains stable.\n\n## §B bugs\n' });
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', code: null, body: '## Invariants\n\nV1: Fixture remains stable.\n\n## §B bugs\n' });
   checked = gate(root);
-  assert.match(checked.stderr, /docs\/core\.md has no "covers:" globs/);
+  assert.match(checked.stderr, /docs\/core\.md has no "code:" folder/);
   assert.match(checked.stderr, /"## §B bugs" does not belong/);
 
-  writeDoc(root, 'docs/core.md', { id: 'fixture.core', covers: ['lib/**'], body: '## Invariants\n\nV1: Fixture remains stable.\n' });
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', code: 'lib', body: '## Invariants\n\nV1: Fixture remains stable.\n' });
   checked = gate(root);
-  assert.match(checked.stderr, /the "covers:" glob "lib\/\*\*" matches no file/);
+  assert.match(checked.stderr, /docs\/core\.md: the "code:" folder "lib" does not exist/);
 
-  writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: '## Invariants\n\nV1: Fixture remains stable.\n' });
+  // A backslash and a trailing slash are Windows habits; the gate reads the same folder.
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', code: 'src\\', body: '## Invariants\n\nV1: Fixture remains stable.\n' });
   checked = gate(root);
   assert.equal(checked.status, 0, checked.stderr);
   assert.equal(docsGate(root).status, 0, docsGate(root).stderr);
 
-  // A doc of record in a workspace docs/ folder covers that workspace only.
-  writeFileSync(join(root, 'src', 'package.json'), '{ "name": "src" }\n', 'utf8');
-  writeDoc(root, 'src/docs/web.md', { id: 'fixture.web', covers: ['README.md'] });
+  // CRLF line endings in the frontmatter read the same.
+  const corePath = join(root, 'docs', 'core.md');
+  writeFileSync(corePath, readFileSync(corePath, 'utf8').replaceAll('\n', '\r\n'), 'utf8');
   checked = gate(root);
-  assert.match(checked.stderr, /src\/docs\/web\.md: the "covers:" glob "README\.md" is outside src/);
+  assert.equal(checked.status, 0, checked.stderr);
+
+  // One folder has one doc.
+  writeDoc(root, 'docs/other.md', { id: 'fixture.other' });
+  checked = gate(root);
+  assert.match(checked.stderr, /docs\/core\.md and docs\/other\.md both claim the "code:" folder "src"/);
+  rmSync(join(root, 'docs', 'other.md'));
+
+  // A doc of record in a workspace docs/ folder owns a folder of that workspace only.
+  writeFileSync(join(root, 'src', 'package.json'), '{ "name": "src" }\n', 'utf8');
+  mkdirSync(join(root, 'tools'), { recursive: true });
+  writeFileSync(join(root, 'tools', 'build.js'), 'export const build = 1;\n', 'utf8');
+  writeDoc(root, 'src/docs/web.md', { id: 'fixture.web', code: 'tools' });
+  checked = gate(root);
+  assert.match(checked.stderr, /src\/docs\/web\.md: the "code:" folder "tools" is outside src/);
+});
+
+test('the owner of a runtime file is the doc with the longest code: folder [@invariant sdd-enforce.gates:V18]', () => {
+  const root = installed();
+  mkdirSync(join(root, 'src', 'auth'), { recursive: true });
+  writeFileSync(join(root, 'src', 'auth', 'login.js'), 'export const login = 1;\n', 'utf8');
+  writeDoc(root, 'docs/app.md', { id: 'fixture.app', code: 'src' });
+  writeDoc(root, 'docs/auth.md', { id: 'fixture.auth', code: 'src/auth' });
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', `docs: add the owner docs\n\nDoc-Impact: none - src/auth/login.js ${NO_IMPACT}`]);
+
+  const messagePath = join(root, '.git', 'TEST_COMMIT_MSG');
+  writeFileSync(messagePath, 'feat: change login\n', 'utf8');
+  writeFileSync(join(root, 'src', 'auth', 'login.js'), 'export const login = 2;\n', 'utf8');
+  writeFileSync(join(root, 'docs', 'app.md'), `${readFileSync(join(root, 'docs', 'app.md'), 'utf8')}\nThe parent doc changed.\n`, 'utf8');
+  git(root, ['add', 'src/auth/login.js', 'docs/app.md']);
+  let checked = gate(root, ['--staged', '--commit-msg', messagePath]);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /src\/auth\/login\.js \(owner: docs\/auth\.md\)/);
+
+  writeFileSync(join(root, 'docs', 'auth.md'), `${readFileSync(join(root, 'docs', 'auth.md'), 'utf8')}\nLogin returns 2.\n`, 'utf8');
+  git(root, ['add', 'docs/auth.md']);
+  checked = gate(root, ['--staged', '--commit-msg', messagePath]);
+  assert.equal(checked.status, 0, checked.stderr);
 });
 
 test('the gate fails on a SPEC.md and on an @spec citation, and names the new form [@invariant sdd-enforce.gates:V1]', () => {
@@ -485,7 +524,7 @@ test('a staged runtime edit needs a covering doc of record or a concrete Doc-Imp
   checked = gate(root, ['--staged', '--commit-msg', messagePath]);
   assert.equal(checked.status, 0, checked.stderr);
 
-  // A doc of record whose covers match the file owns it: staging the doc with the code needs no trailer.
+  // The doc of record whose code: folder holds the file owns it: staging the doc with the code needs no trailer.
   writeDoc(root, 'docs/core.md', { id: 'fixture.core' });
   writeFileSync(messagePath, 'feat: add feature\n', 'utf8');
   checked = gate(root, ['--staged', '--commit-msg', messagePath]);
@@ -660,7 +699,7 @@ test('post-edit reminder tells the agent what to do next in plain words', () => 
   assert.equal(result.status, 0, result.stderr);
   const context = JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
   assert.match(context, /You edited src\/a\.js/);
-  assert.match(context, /doc of record whose covers: matches/);
+  assert.match(context, /the doc of record whose code: folder holds/);
   assert.match(context, /Doc-Impact: none - /);
   assert.match(context, /node scripts\/check-sdd\.mjs/);
   assert.doesNotMatch(context, /changes-log/);
@@ -1197,7 +1236,7 @@ test('check-docs demands AGENTS.md per workspace, a covering doc per module, its
 
   writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n', 'utf8');
   mkdirSync(join(root, 'apps', 'api', 'docs'), { recursive: true });
-  writeFileSync(join(root, 'apps', 'api', 'docs', 'auth.md'), "---\nid: api.auth\ncovers:\n  - 'apps/api/src/modules/auth/**'\n---\n\n# Auth\n\n## Goal\n\nLog users in.\n", 'utf8');
+  writeFileSync(join(root, 'apps', 'api', 'docs', 'auth.md'), "---\nid: api.auth\ncode: apps/api/src/modules/auth\n---\n\n# Auth\n\n## Goal\n\nLog users in.\n", 'utf8');
   checked = docsGate(root);
   assert.notEqual(checked.status, 0);
   assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/docs\/auth\.md/);

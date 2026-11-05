@@ -15,7 +15,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cursorRulesProblems } from './gen-cursor-rules.mjs';
-import { DOC_ID, docOfRecord, matchesGlob, normalize, skipRules, walkFiles } from './sdd-lib.mjs';
+import { DOC_ID, docOfRecord, normalize, ownerDoc, skipRules, walkFiles } from './sdd-lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_PATH = join(ROOT, '.agent-sdd', 'config.json');
@@ -129,11 +129,12 @@ const isTestFile = (key) => /(?:^|\/)(?:__tests__\/|[^/]+\.(?:spec|test)\.[^/]+$
 function checkDocsOfRecord() {
   for (const path of files((item) => basename(item) === 'SPEC.md')) {
     fail(
-      `${rel(path)}: a module doc is no longer a SPEC.md. Move it to <workspace>/docs/<module>.md, add "covers:" globs for the files it owns, ` +
-        `use the long headings, and drop the Tasks, Bugs and Files tables (shape in ${DOC_RULES}).`,
+      `${rel(path)}: a module doc is no longer a SPEC.md. Move it to <workspace>/docs/<module>.md, add a "code:" folder for the code it owns, ` +
+        `and drop the Tasks, Bugs and Files tables (shape in ${DOC_RULES}).`,
     );
   }
   const docs = new Map();
+  const codeFolders = new Map();
   for (const path of files((item) => extname(item) === '.md')) {
     const key = rel(path);
     const body = normalize(readFileSync(path, 'utf8'));
@@ -142,18 +143,18 @@ function checkDocsOfRecord() {
     if (!doc.id || !DOC_ID.test(doc.id)) {
       fail(`missing or invalid stable id: ${key}. Add "id: <lowercase id, dots or dashes allowed>" to the frontmatter. Tests cite this id, so it never changes once set.`);
     }
-    if (!doc.hasCovers || !doc.covers.length) {
-      fail(`${key} has no "covers:" globs. List the files this doc of record owns, as globs relative to the repository root (${DOC_RULES}).`);
-    }
     const docsDir = dirname(key);
     const owner = docsDir === 'docs' ? '' : docsDir.slice(0, -'/docs'.length);
-    for (const glob of doc.covers) {
-      if (!allFiles.some((file) => matchesGlob(file, glob))) {
-        fail(`${key}: the "covers:" glob "${glob}" matches no file. Fix the glob or remove it.`);
-      }
-      if (owner && !String(glob).replace(/^\.?\//, '').startsWith(`${owner}/`)) {
-        fail(`${key}: the "covers:" glob "${glob}" is outside ${owner}. A doc in ${docsDir}/ covers files of that workspace only; move a doc that spans workspaces to the root docs/.`);
-      }
+    if (!doc.code) {
+      fail(`${key} has no "code:" folder. Name the one folder this doc of record owns, relative to the repository root (${DOC_RULES}).`);
+    } else if (!allFiles.some((file) => file.startsWith(`${doc.code}/`))) {
+      fail(`${key}: the "code:" folder "${doc.code}" does not exist. Fix the path, or move the doc together with its code.`);
+    } else if (owner && doc.code !== owner && !doc.code.startsWith(`${owner}/`)) {
+      fail(`${key}: the "code:" folder "${doc.code}" is outside ${owner}. A doc in ${docsDir}/ owns a folder of that workspace only; move it to the docs/ folder of the workspace that holds the code.`);
+    } else if (codeFolders.has(doc.code)) {
+      fail(`${codeFolders.get(doc.code)} and ${key} both claim the "code:" folder "${doc.code}". One folder has one doc of record: merge the two docs, or point one of them at a folder inside it.`);
+    } else {
+      codeFolders.set(doc.code, key);
     }
     const invariants = new Set();
     for (const match of body.matchAll(/^(?:-\s+)?(?:\*\*)?(V\d+)(?:\*\*)?:/gm)) {
@@ -442,7 +443,7 @@ function workspaceRoot(path, runtimeRoot) {
   return runtimeRoot;
 }
 
-/** Owners of a runtime file: every doc of record whose "covers:" matches it, else the workspace AGENTS.md. */
+/** The owner of a runtime file: the doc of record with the longest "code:" folder that holds it, else the workspace AGENTS.md. */
 let docsCache = null;
 function ownersFor(path) {
   const runtimeRoot = runtimeRootFor(path);
@@ -451,8 +452,8 @@ function ownersFor(path) {
     .filter((key) => key.endsWith('.md'))
     .map((key) => docOfRecord(key, readFileSync(join(ROOT, key), 'utf8')))
     .filter(Boolean);
-  const docs = docsCache.filter((doc) => doc.covers.some((glob) => matchesGlob(path, glob))).map((doc) => doc.path);
-  if (docs.length) return docs;
+  const doc = ownerDoc(path, docsCache);
+  if (doc) return [doc.path];
   const agents = `${workspaceRoot(path, runtimeRoot)}/AGENTS.md`;
   return existsSync(join(ROOT, agents)) ? [agents] : [];
 }

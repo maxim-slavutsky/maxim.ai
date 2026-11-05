@@ -800,7 +800,7 @@ function legacyItems(root, allFiles, manifest) {
   for (const path of allFiles.filter((item) => !isSkipped(item))) {
     const name = basename(path);
     if (name === 'SPEC.md') {
-      out.push({ path, action: 'move to <workspace>/docs/<module>.md: add "covers:" globs, use the long headings in plain prose, drop the Tasks, Bugs and Files tables (open work and bugs go to the issue tracker)' });
+      out.push({ path, action: 'move to <workspace>/docs/<module>.md: add a "code:" folder, drop the Tasks, Bugs and Files tables (open work and bugs go to the issue tracker)' });
     } else if (name === 'CLAUDE.md') {
       out.push({ path, action: 'move each line that AGENTS.md lacks into the AGENTS.md beside it, then delete the file' });
     } else if (/(?:^|\/)docs\/(?:.*\/)?[^/]*[A-Z_][^/]*\.md$/.test(path) && !['README.md', 'AGENTS.md'].includes(name)) {
