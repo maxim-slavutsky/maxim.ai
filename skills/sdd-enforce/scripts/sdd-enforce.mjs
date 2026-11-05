@@ -62,6 +62,7 @@ const entries = [
   ['core', 'scripts/check-docs.mjs'],
   ['core', 'scripts/gen-cursor-rules.mjs'],
   ['core', 'scripts/sdd-lib.mjs'],
+  ['core', 'scripts/docs-standard.mjs'],
   ['core', '.claude/hooks/post-edit-reminder.mjs'],
   ['core', '.agents/skills/agent-parity/SKILL.md'],
   ['core', '.agents/skills/agent-parity/agents/openai.yaml'],

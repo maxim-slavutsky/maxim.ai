@@ -28,7 +28,7 @@ function fixture() {
   git(root, ['config', 'user.name', 'SDD Enforce Test']);
   git(root, ['config', 'user.email', 'sdd-enforce@example.invalid']);
   git(root, ['config', 'core.autocrlf', 'false']);
-  writeFileSync(join(root, 'README.md'), '# Fixture\n', 'utf8');
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\nA repository for the sdd-enforce tests.\n', 'utf8');
   mkdirSync(join(root, 'src'), { recursive: true });
   writeFileSync(join(root, 'src', 'index.js'), 'export const index = 0;\n', 'utf8');
   git(root, ['add', '.']);
@@ -683,7 +683,7 @@ test('gate messages say what is wrong and how to fix it', () => {
   assert.match(checked.stderr, /README\.md links to "docs\/missing\.md" but that file does not exist/);
 
   writeFileSync(join(root, 'src', 'core.test.js'), "test('holds [@invariant fixture.core:V1]', () => {});\n", 'utf8');
-  writeFileSync(join(root, 'README.md'), '# Fixture\n', 'utf8');
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\nA repository for the sdd-enforce tests.\n', 'utf8');
   assert.equal(gate(root).status, 0, gate(root).stderr);
 
   writeFileSync(join(root, 'src', 'feature.js'), 'export const value = 1;\n', 'utf8');
@@ -948,6 +948,55 @@ test('check-docs applies the docs standard: no CLAUDE.md, kebab-case docs, sizes
   assert.match(checked.stderr, /deploying\/SKILL\.md: the frontmatter "name" is "deploy"; set it to the folder name "deploying"/);
   assert.match(checked.stderr, /the description has 1025 characters; keep it at most 1024/);
   assert.match(checked.stderr, /\.claude\/rules\/lib\.md: the "paths:" glob "lib\/\*\*" matches no file/);
+});
+
+test('check-docs applies the rubric script criteria: root README, root AGENTS.md, glossary terms [@invariant sdd-enforce.gates:V16]', () => {
+  const root = installed();
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\n', 'utf8');
+  writeFileSync(join(root, 'GLOSSARY.md'), '# Glossary\n\n**Bet slip**:\nThe bets a user collects.\n\n**Spec**:\nA plan.\n', 'utf8');
+  let checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /README\.md holds only a heading/);
+  assert.match(checked.stderr, /GLOSSARY\.md: the term "Spec" collides with the writing term "Spec"/);
+  assert.doesNotMatch(checked.stderr, /Bet slip/);
+
+  rmSync(join(root, 'AGENTS.md'));
+  checked = docsGate(root);
+  assert.match(checked.stderr, /missing AGENTS\.md at the repository root/);
+});
+
+test('check-docs fails on each migration detect hit and names the migration and its step [@invariant sdd-enforce.gates:V20]', () => {
+  const root = installed();
+  const hits = [
+    ['docs/plans/cashout.md', '# Cashout plan\n', 'plans-in-jira-not-files'],
+    ['docs/superpowers/specs/2026-01-01-a-design.md', '# Design\n', 'plans-in-jira-not-files'],
+    ['tasks/todo.md', '- write it\n', 'plans-in-jira-not-files'],
+    ['CONTEXT.md', '# Context\n', 'context-md-to-glossary-md'],
+    ['docs/notes.md', '# Notes\n\nThis is the Spec of Record for cashout.\n', 'spec-of-record-to-doc-of-record'],
+    ['docs/adr/0001-postgres.md', "---\nstatus: 'accepted'\n---\n\n# Postgres\n\n**Status**: accepted\n", 'adr-status-in-frontmatter'],
+    ['GLOSSARY.md', '# Glossary\n\n## Writing\n', 'writing-terms-out-of-glossary'],
+    ['apps/web/AGENTS.md', '# web\n\nResearch lives in the session scratchpad.\n', 'research-notes-in-docs-research'],
+  ];
+  for (const [path, body] of hits) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body, 'utf8');
+  }
+  let checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  for (const [path, , slug] of hits) {
+    assert.match(checked.stderr, new RegExp(`${path.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}: .*migration "${slug}"`), `${path} hits ${slug}`);
+  }
+
+  // Test fixtures, docs/map.md and gitignored files are outside the checks, as in the audit.
+  for (const [path] of hits) rmSync(join(root, path));
+  for (const path of ['evals/case/docs/plans/x.md', 'fixtures/CONTEXT.md', '.scratch/plan.md']) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), '# Plan\n', 'utf8');
+  }
+  writeFileSync(join(root, '.gitignore'), '.scratch/\n', 'utf8');
+  writeFileSync(join(root, 'docs', 'map.md'), `${readFileSync(join(root, 'docs', 'map.md'), 'utf8')}\nNo spec of record here.\n`, 'utf8');
+  checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
 });
 
 test('docs/map.md holds the rows the tool adds, in a block that merge and uninstall respect [@invariant sdd-enforce.gates:V19]', () => {

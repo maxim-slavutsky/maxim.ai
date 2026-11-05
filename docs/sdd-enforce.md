@@ -24,6 +24,7 @@ critical:
   - V17
   - V18
   - V19
+  - V20
 ---
 
 # sdd-enforce installer and gates
@@ -130,7 +131,9 @@ conflict. It removes the `.gitignore` block for `changes-log.md` and moves hook 
 V16: `scripts/check-docs.mjs` fails on any `CLAUDE.md` and on a doc under `docs/` with a name that is not
 kebab-case. It fails on an `AGENTS.md` of 200 lines or more and on a `SKILL.md` of 500 lines or more. It fails on
 a skill whose `name` differs from its folder, a `description` over 1,024 characters, and a rule `paths:` glob that
-matches no file.
+matches no file. It fails on a missing root `AGENTS.md`, a missing root `README.md` or one that holds only
+headings, and a `GLOSSARY.md` term that is a writing term of the standard. Paths under `evals/`, `fixture/`,
+`fixtures/`, `__fixtures__/` and `testdata/` are outside these checks, as in the audit.
 
 V17: Apply sets the `paths:` of the doc-of-record rule to `<runtimeRoot>/**` for each runtime root. It keeps only
 the rule globs that match a file once apply has run. A rule with no such glob is not written, nor is its `.agents`
@@ -145,3 +148,9 @@ V19: Apply writes the tool's map rows between `<!-- sdd-enforce:start -->` and `
 `docs/map.md`. The rows follow the enabled agents. It creates the file, or merges the block into an existing file
 and keeps the rows outside it. Uninstall removes the block, and deletes the file only when install created it and
 only the block and the heading remain.
+
+V20: `scripts/check-docs.mjs` fails on each hit of a migration detect check of the docs standard that a script can
+decide: `context-md-to-glossary-md`, `plans-in-jira-not-files`, `spec-of-record-to-doc-of-record`,
+`adr-status-in-frontmatter`, `research-notes-in-docs-research` and `writing-terms-out-of-glossary`. The message
+names the path, the migration and its step. `docs/map.md`, the migration's own exempt globs, test fixtures and
+files Git ignores never hit.
