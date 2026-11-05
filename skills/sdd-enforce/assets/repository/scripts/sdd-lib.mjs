@@ -150,3 +150,17 @@ export function docsOfRecord(root, files) {
   }
   return out;
 }
+
+/**
+ * Folders that the rows of `docs/map.md` declare as a home: each backticked path ending in "/" in the second
+ * column ("It goes in") of a table row. A home outside the standard's homes passes the gates only when declared.
+ */
+export function declaredHomes(mapBody) {
+  const out = new Set();
+  for (const line of normalize(mapBody).split('\n')) {
+    if (!line.trim().startsWith('|')) continue;
+    const cells = line.split(/(?<!\\)\|/);
+    for (const match of (cells[2] ?? '').matchAll(/`([^`]+\/)`/g)) out.add(normalizeFolder(match[1]));
+  }
+  return [...out];
+}

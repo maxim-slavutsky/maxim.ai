@@ -15,7 +15,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cursorRulesProblems } from './gen-cursor-rules.mjs';
-import { DOC_ID, docOfRecord, normalize, ownerDoc, skipRules, walkFiles } from './sdd-lib.mjs';
+import { DOC_ID, declaredHomes, docOfRecord, frontmatter, frontmatterList, normalize, ownerDoc, skipRules, walkFiles } from './sdd-lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_PATH = join(ROOT, '.agent-sdd', 'config.json');
@@ -218,15 +218,18 @@ function skillNames(base) {
   return readdirSync(base).filter((name) => existsSync(join(base, name, 'SKILL.md')) && !isSkippedPath(join(base, name)));
 }
 
-/** Repo-relative concern docs (Markdown directly under a docs/ folder) that `path` links. */
+// Folders that docs/map.md declares as an added home. A concern doc inside one of them counts as a concern doc.
+const MAP_PATH = join(ROOT, 'docs', 'map.md');
+const DECLARED_HOMES = existsSync(MAP_PATH) ? declaredHomes(readFileSync(MAP_PATH, 'utf8')) : [];
+
+/**
+ * Repo-relative concern docs that `path` links: Markdown directly under a docs/ folder, or directly under a docs/
+ * subfolder that docs/map.md declares.
+ */
 function concernDocLinks(path) {
-  return [
-    ...new Set(
-      markdownLinks(path)
-        .map((link) => rel(link.absolute))
-        .filter((target) => /(?:^|\/)docs\/[^/]+\.md$/.test(target)),
-    ),
-  ];
+  const isConcernDoc = (target) =>
+    /(?:^|\/)docs\/[^/]+\.md$/.test(target) || DECLARED_HOMES.some((home) => /^docs\//.test(home) && dirname(target) === home);
+  return [...new Set(markdownLinks(path).map((link) => rel(link.absolute)).filter(isConcernDoc))];
 }
 
 /**
@@ -284,6 +287,9 @@ function checkAgents() {
   const agents = new Set(config?.agents ?? []);
   const claudeSkills = new Set(skillNames(join(ROOT, '.claude', 'skills')));
   const sharedSkills = new Set(skillNames(join(ROOT, '.agents', 'skills')));
+  const rulesDir = join(ROOT, '.claude', 'rules');
+  // A legacy INDEX.md (rules index up to 0.4.0) is not a rule.
+  const claudeRules = existsSync(rulesDir) ? readdirSync(rulesDir).filter((name) => name.endsWith('.md') && name !== 'INDEX.md').map((name) => name.slice(0, -3)) : [];
   if (agents.has('claude') && (agents.has('codex') || agents.has('cursor'))) {
     for (const name of claudeSkills) {
       if (!sharedSkills.has(name)) {
@@ -294,6 +300,19 @@ function checkAgents() {
       if (!claudeSkills.has(name) && !existsSync(join(ROOT, '.claude', 'rules', `${name}.md`))) {
         fail(`.agents skill lacks Claude counterpart: ${name}. Create .claude/rules/${name}.md (for a path-scoped rule) or .claude/skills/${name}/SKILL.md (for a procedure someone starts).`);
       }
+    }
+    for (const name of claudeRules) {
+      if (!sharedSkills.has(name)) {
+        fail(`Claude rule lacks .agents counterpart: ${name}. Create .agents/skills/${name}/SKILL.md that links the rule's concern doc, plus agents/openai.yaml, so Codex and Cursor load the same rules (${PARITY_DOC}).`);
+      }
+    }
+  }
+  // A rule without "paths:" loads in every Claude Code session; a line every session needs belongs in AGENTS.md.
+  for (const name of claudeRules) {
+    const rule = `.claude/rules/${name}.md`;
+    const block = frontmatter(normalize(readFileSync(join(ROOT, rule), 'utf8')));
+    if (!(block && frontmatterList(block, 'paths')?.length)) {
+      fail(`${rule} has no "paths:", so it loads in every session. Add "paths:" globs for the files it governs, or move its lines into AGENTS.md and delete the rule.`);
     }
   }
   if (agents.has('codex')) {
@@ -693,7 +712,8 @@ function checkChangeImpact(args) {
         if (waived.size) console.log(`check-sdd: waived ${commit.slice(0, 12)} for ${[...waived].join(', ')} (listed in .agent-sdd/waivers.json)`);
         if (waived.size === WAIVER_GATES.length) continue;
         const changedFiles = git([
-          'diff-tree', '--root', '--no-commit-id', '--name-only', '-r', '--diff-filter=ACMRD', commit,
+          // -M: a moved file is one path, its new one, as --staged sees it. Without it the old path reads as a change.
+          'diff-tree', '--root', '-M', '--no-commit-id', '--name-only', '-r', '--diff-filter=ACMRD', commit,
         ]).split('\n').filter(Boolean);
         impactProblems(changedFiles, git(['show', '-s', '--format=%B', commit]), `commit ${commit.slice(0, 12)}`, waived);
       }

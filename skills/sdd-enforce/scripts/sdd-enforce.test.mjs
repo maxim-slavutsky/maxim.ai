@@ -1040,6 +1040,52 @@ test('check-docs fails on an ADR status form, a one-sided supersession, a bare r
   assert.equal(checked.status, 0, checked.stderr);
 });
 
+test('a rule needs paths: and an .agents twin when Codex or Cursor is on [@invariant sdd-enforce.gates:V22]', () => {
+  const root = installed();
+  writeFileSync(join(root, '.claude', 'rules', 'x.md'), '---\ndescription: x\n---\n\n# X\n\nThe rules: [agent parity](../../docs/agent-parity.md).\n', 'utf8');
+  const checked = gate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /\.claude\/rules\/x\.md has no "paths:"/);
+  assert.match(checked.stderr, /Claude rule lacks \.agents counterpart: x/);
+});
+
+test('a rule may link a concern doc in a folder that docs/map.md declares [@invariant sdd-enforce.gates:V22]', () => {
+  const root = installed();
+  const write = (path, body) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body, 'utf8');
+  };
+  write('.claude/rules/y.md', '---\ndescription: y\npaths:\n  - "src/**"\n---\n\n# Y\n\nThe rules: [y](../../docs/workflows/y.md).\n');
+  write('docs/workflows/y.md', '# Y\n\nLoaded by [the rule](../../.claude/rules/y.md).\n');
+  write('.agents/skills/y/SKILL.md', '---\nname: y\ndescription: Use when editing src.\n---\n\n# Y\n\nRead [y](../../../docs/workflows/y.md).\n');
+  write('.agents/skills/y/agents/openai.yaml', 'interface:\n  display_name: "Y"\n');
+  execFileSync(process.execPath, [join(root, 'scripts', 'gen-cursor-rules.mjs')], { cwd: root });
+  let checked = gate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /rule must link exactly one concern doc \(found 0\): \.claude\/rules\/y\.md/);
+
+  // A row the repository adds names the folder; CRLF line ends read the same.
+  const mapPath = join(root, 'docs', 'map.md');
+  writeFileSync(mapPath, `${readFileSync(mapPath, 'utf8')}\r\n| the policy of one workflow | \`docs/workflows/<name>.md\`, in \`docs/workflows/\` | yes | by its rule |\r\n`, 'utf8');
+  checked = gate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('--changed follows a moved folder like --staged does [@invariant sdd-enforce.gates:V22]', () => {
+  const root = installed();
+  mkdirSync(join(root, 'src', 'a'), { recursive: true });
+  writeFileSync(join(root, 'src', 'a', 'x.js'), 'export const x = 1;\n', 'utf8');
+  writeDoc(root, 'docs/a.md', { id: 'fixture.a', code: 'src/a' });
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'feat: add module a']);
+  git(root, ['mv', 'src/a', 'src/b']);
+  writeFileSync(join(root, 'docs', 'a.md'), readFileSync(join(root, 'docs', 'a.md'), 'utf8').replace('code: src/a', 'code: src/b'), 'utf8');
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-q', '-m', 'refactor: move module a to b']);
+  const checked = gate(root, ['--changed', '--base', 'HEAD^']);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
 test('docs/map.md holds the rows the tool adds, in a block that merge and uninstall respect [@invariant sdd-enforce.gates:V19]', () => {
   const lean = fixture();
   assert.equal(run(['apply', lean, '--write', '--agents', 'claude']).status, 0);
