@@ -102,8 +102,10 @@ folds like a Git trailer. Each following line that starts with whitespace contin
 line without leading whitespace ends it.
 
 V11: `scripts/check-docs.mjs` fails on a workspace under `runtimeRoots` without `AGENTS.md`, and on a module folder
-under `moduleRoots` that no doc of record covers. It fails on a doc of record that the nearest `AGENTS.md` above
-its `docs/` folder does not link. With the `sdd` profile, it fails on a root `AGENTS.md` that does not link
+under `moduleRoots` that no doc of record covers: a doc covers a module when its `code:` is the module folder or a
+folder inside it. It fails on a doc of record that the `README.md` of its `docs/` folder does not link, and on
+that index when the nearest `AGENTS.md` above the `docs/` folder does not link it. A link with an anchor or an
+encoded character counts. With the `sdd` profile, it fails on a root `AGENTS.md` that does not link
 `docs/doc-of-record.md`. A non-empty `docsStandardLine` must be a line of the root `AGENTS.md`. `verify` runs
 check-docs, then check-sdd, and fails when either fails.
 

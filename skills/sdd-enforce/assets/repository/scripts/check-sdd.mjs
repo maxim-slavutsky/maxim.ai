@@ -114,7 +114,7 @@ function checkDocs() {
     if (key === 'AGENTS.md') continue;
     const kind = basename(path) === 'AGENTS.md' ? 'AGENTS.md' : docOfRecord(key, readFileSync(path, 'utf8')) ? 'doc of record' : null;
     if (kind && !inbound.has(key)) {
-      fail(`unreachable ${kind}: ${key}. No other Markdown file links to it, so people and agents cannot find it. Add a link from the nearest AGENTS.md or README.md.`);
+      fail(`unreachable ${kind}: ${key}. No other Markdown file links to it, so people and agents cannot find it. Link an AGENTS.md from its parent AGENTS.md or README.md, and list a doc of record in the README.md of its docs/ folder.`);
     }
   }
 }

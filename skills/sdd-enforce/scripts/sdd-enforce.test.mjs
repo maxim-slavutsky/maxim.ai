@@ -91,7 +91,14 @@ function runtimeCommit(root, name, message) {
   return git(root, ['rev-parse', 'HEAD']);
 }
 
-/** A doc of record at `relPath`, linked from the root AGENTS.md so both gates can reach it. */
+/** Adds a link line to a Markdown file (created with `heading`) unless it links `target` already. */
+function addLink(root, file, target, label, heading) {
+  const path = join(root, file);
+  const body = existsSync(path) ? readFileSync(path, 'utf8') : `${heading}\n`;
+  if (!body.includes(`](${target})`)) writeFileSync(path, `${body.trimEnd()}\n\n- [${label}](${target})\n`, 'utf8');
+}
+
+/** A doc of record at `relPath`, listed in its docs/README.md index, which the root AGENTS.md links. */
 function writeDoc(root, relPath, { id, code = 'src', critical = [], body = '## Goal\n\nThe fixture exists.\n' }) {
   const lines = ['---', `id: ${id}`];
   if (code !== null) lines.push(`code: ${code}`);
@@ -99,9 +106,9 @@ function writeDoc(root, relPath, { id, code = 'src', critical = [], body = '## G
   lines.push('---', '', `# ${id}`, '', body);
   mkdirSync(dirname(join(root, relPath)), { recursive: true });
   writeFileSync(join(root, relPath), lines.join('\n'), 'utf8');
-  const agentsPath = join(root, 'AGENTS.md');
-  const agents = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf8') : '# Fixture agents\n';
-  if (!agents.includes(`](${relPath})`)) writeFileSync(agentsPath, `${agents.trimEnd()}\n\n- [${id}](${relPath})\n`, 'utf8');
+  const index = `${dirname(relPath)}/README.md`;
+  addLink(root, index, relPath.slice(dirname(relPath).length + 1), id, '# Docs of record');
+  addLink(root, 'AGENTS.md', index, 'docs of record', '# Fixture agents');
 }
 
 const NO_IMPACT = 'exports a fixture constant without observable runtime behavior';
@@ -1217,6 +1224,29 @@ test('a Doc-Impact reason may fold over continuation lines, like a Git trailer [
   assert.match(checked.stderr, /does not name src\/folded\.js/);
 });
 
+test('docs/README.md indexes every doc of record, and the nearest AGENTS.md links the index [@invariant sdd-enforce.gates:V11]', () => {
+  const root = installed();
+  // A repo with no workspace: the root is the one workspace, so its index is docs/README.md.
+  writeFileSync(join(root, 'docs', 'core.md'), '---\nid: fixture.core\ncode: src\n---\n\n# Core\n\n## Goal\n\nThe fixture exists.\n', 'utf8');
+  let checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /docs\/README\.md does not list docs\/core\.md/);
+
+  // A link with an anchor or an encoded character still counts.
+  writeFileSync(join(root, 'docs', 'net-tools.md'), '---\nid: fixture.net\ncode: tools\n---\n\n# Net\n', 'utf8');
+  mkdirSync(join(root, 'tools'), { recursive: true });
+  writeFileSync(join(root, 'tools', 'ping.js'), 'export const ping = 1;\n', 'utf8');
+  writeFileSync(join(root, 'docs', 'README.md'), '# Docs of record\n\n- [core](core.md#v1)\n- [net](net%2Dtools.md)\n', 'utf8');
+  checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.doesNotMatch(checked.stderr, /does not list/);
+  assert.match(checked.stderr, /AGENTS\.md does not link docs\/README\.md/);
+
+  addLink(root, 'AGENTS.md', 'docs/README.md', 'docs of record', '# Fixture agents');
+  checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
 test('check-docs demands AGENTS.md per workspace, a covering doc per module, its link, and the root pointer [@invariant sdd-enforce.gates:V11]', () => {
   const root = fixture();
   mkdirSync(join(root, 'apps', 'api', 'src', 'modules', 'auth'), { recursive: true });
@@ -1239,9 +1269,14 @@ test('check-docs demands AGENTS.md per workspace, a covering doc per module, its
   writeFileSync(join(root, 'apps', 'api', 'docs', 'auth.md'), "---\nid: api.auth\ncode: apps/api/src/modules/auth\n---\n\n# Auth\n\n## Goal\n\nLog users in.\n", 'utf8');
   checked = docsGate(root);
   assert.notEqual(checked.status, 0);
-  assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/docs\/auth\.md/);
+  assert.match(checked.stderr, /apps\/api\/docs\/README\.md does not list apps\/api\/docs\/auth\.md/);
 
-  writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n\n- [auth](docs/auth.md): the auth module\n', 'utf8');
+  writeFileSync(join(root, 'apps', 'api', 'docs', 'README.md'), '# api docs\n\n- [auth](auth.md): the auth module\n', 'utf8');
+  checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/docs\/README\.md/);
+
+  writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n\n- [docs of record](docs/README.md): one per module\n', 'utf8');
   checked = docsGate(root);
   assert.equal(checked.status, 0, checked.stderr);
   assert.match(checked.stdout, /check-docs: ok/);

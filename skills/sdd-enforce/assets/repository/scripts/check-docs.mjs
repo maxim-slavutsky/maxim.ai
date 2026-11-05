@@ -5,7 +5,7 @@
  *
  *   - every workspace under a runtime root (a folder with its own package manifest) carries an AGENTS.md;
  *   - every module folder under a configured module root is covered by a doc of record;
- *   - every doc of record is linked from the nearest AGENTS.md above its docs/ folder;
+ *   - the README.md of each docs/ folder lists its docs of record, and the nearest AGENTS.md links that index;
  *   - the root AGENTS.md links docs/doc-of-record.md, and carries "docsStandardLine" when the config sets one;
  *   - no CLAUDE.md, kebab-case names under docs/, AGENTS.md under 200 lines, SKILL.md under 500 lines, a skill
  *     name equal to its folder name, a skill description of at most 1,024 characters, and rule paths: globs that
@@ -95,11 +95,21 @@ function nearestAgents(dir) {
 function linkTargets(path) {
   const out = new Set();
   for (const match of read(path).matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
-    const target = match[1].trim().replace(/^<|>$/g, '').split('#')[0].split('?')[0];
+    let target = match[1].trim().replace(/^<|>$/g, '').split('#')[0].split('?')[0];
     if (!target || /^[a-z]+:/i.test(target)) continue;
+    try {
+      target = decodeURIComponent(target);
+    } catch {
+      // A bad escape stays literal; the link then names no file.
+    }
     out.add(rel(resolve(ROOT, dirname(path), target)));
   }
   return out;
+}
+
+/** The index that lists a doc of record: the README.md of its docs/ folder. */
+function indexPath(doc) {
+  return `${dirname(doc.path)}/README.md`;
 }
 
 // 1. Every workspace under a runtime root carries an AGENTS.md.
@@ -114,7 +124,7 @@ function checkWorkspaces() {
   }
 }
 
-// 2 + 3. Every module folder is covered by a doc of record, and the nearest AGENTS.md links every doc of record.
+// 2 + 3. Every module folder is covered by a doc of record, its docs/README.md lists it, and the nearest AGENTS.md links that index.
 function checkModules(docs) {
   for (const pattern of config?.moduleRoots ?? []) {
     for (const moduleRoot of expand(pattern)) {
@@ -131,14 +141,22 @@ function checkModules(docs) {
       }
     }
   }
+  const indexes = new Set();
   for (const doc of docs) {
-    const docsDir = dirname(doc.path);
-    const owner = docsDir === 'docs' ? '' : docsDir.slice(0, -'/docs'.length);
-    const agents = nearestAgents(owner);
+    const index = indexPath(doc);
+    if (!existsSync(join(ROOT, index)) || !linkTargets(index).has(doc.path)) {
+      fail(`${index} does not list ${doc.path}. Each docs/ folder indexes its docs of record in its README.md: add a link row for it.`);
+    }
+    indexes.add(index);
+  }
+  // The AGENTS.md links the index, not each doc, so it stays short however many modules the workspace has.
+  for (const index of indexes) {
+    const docsDir = dirname(index);
+    const agents = nearestAgents(docsDir === 'docs' ? '' : docsDir.slice(0, -'/docs'.length));
     if (!agents) {
-      fail(`${doc.path} has no AGENTS.md above it. Add an AGENTS.md to the workspace and link the doc of record from it.`);
-    } else if (!linkTargets(agents).has(doc.path)) {
-      fail(`${agents} does not link ${doc.path}. Add a Markdown link to it so readers can find the doc of record.`);
+      fail(`${index} has no AGENTS.md above it. Add an AGENTS.md to the workspace and link the index from it.`);
+    } else if (!linkTargets(agents).has(index)) {
+      fail(`${agents} does not link ${index}. Add one Markdown link to the index so readers find every doc of record.`);
     }
   }
 }
