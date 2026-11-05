@@ -49,7 +49,8 @@ profile only to make the installation look complete.
   "exclude": ["node_modules", "dist", "build", "coverage", "vendor"],
   "configGroups": [],
   "helmCharts": [],
-  "docsStandardLine": ""
+  "docsStandardLine": "",
+  "docsStandard": { "name": "", "version": "0.9.0" }
 }
 ```
 
@@ -61,6 +62,9 @@ profile only to make the installation look complete.
 | `configGroups` | `config` profile only. See below. |
 | `helmCharts` | `helm` profile only. See below. |
 | `docsStandardLine` | Empty by default. Non-empty: apply inserts it into the root `AGENTS.md` above the pointer line; `check-docs` requires that exact (trimmed) line. |
+| `docsStandard` | `name`: the plugin that holds the organization's docs standard, from the user. `version`: the standard version whose script checks the gates port; apply writes it. `audit --standard <plugin root>` warns when the installed standard is newer. |
+
+`plan` prints `Needs a value:` for an empty `docsStandardLine` or `docsStandard.name`. Ask the user for each one.
 
 Changed `docsStandardLine` or `runtimeRoots`: commit the config, then run `apply --write` again (apply needs a
 clean tree).

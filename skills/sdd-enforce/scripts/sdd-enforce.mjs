@@ -19,6 +19,8 @@ import { parseRule, toMdc } from '../assets/repository/scripts/gen-cursor-rules.
 import { matchesGlob, skipRules } from '../assets/repository/scripts/sdd-lib.mjs';
 
 const VERSION = '1.0.0';
+// The version of the docs standard whose script checks scripts/docs-standard.mjs ports.
+const STANDARD_VERSION = '0.9.0';
 const SKILL_NAME = 'sdd-enforce';
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSET_ROOT = join(SKILL_ROOT, 'assets', 'repository');
@@ -101,6 +103,10 @@ Commands
                                   lines out of AGENTS.md and docs/map.md, the hook entries out of the settings
                                   files. Your own files stay. Asks you to type "uninstall"
                                   before deleting; without --write it only lists what would go.
+
+Options for audit
+  --standard <dir>                  The root folder of the installed docs standard plugin. Audit warns when its
+                                    version is newer than the one these gates port.
 
 Options for plan, apply, and uninstall
   --profiles core,sdd,config,helm   Which file sets to install. "core,sdd" is the default and always included.
@@ -446,9 +452,15 @@ function desiredFiles(root, profiles, agents) {
     configGroups: current?.configGroups ?? [],
     helmCharts: current?.helmCharts ?? [],
     docsStandardLine: current?.docsStandardLine ?? '',
+    // The standard the gates port: its name comes from the user, its version is the one these gates implement.
+    docsStandard: { name: String(current?.docsStandard?.name ?? ''), version: STANDARD_VERSION },
   };
   output.set(CONFIG, `${JSON.stringify(nextConfig, null, 2)}\n`);
-  return { files: output, skipped, standardLine: String(nextConfig.docsStandardLine ?? '').trim() };
+  const needs = [
+    ...(String(nextConfig.docsStandardLine).trim() ? [] : ['docsStandardLine']),
+    ...(nextConfig.docsStandard.name.trim() ? [] : ['docsStandard.name']),
+  ];
+  return { files: output, skipped, needs, standardLine: String(nextConfig.docsStandardLine ?? '').trim() };
 }
 
 function readManifest(root) {
@@ -692,7 +704,7 @@ function restoreAdvice(path) {
 
 function plan(root, profiles, agents, allowMerge = false, replace = []) {
   const manifest = readManifest(root);
-  const { files: desired, skipped, standardLine } = desiredFiles(root, profiles, agents);
+  const { files: desired, skipped, needs, standardLine } = desiredFiles(root, profiles, agents);
   const desiredPaths = new Set([...desired].map(([path]) => path));
   const replaced = new Set(replace);
   for (const path of replaced) {
@@ -788,7 +800,7 @@ function plan(root, profiles, agents, allowMerge = false, replace = []) {
   // Files from an earlier apply that the selected profiles no longer ship stay tracked while they exist.
   const planned = new Set(actions.map((action) => action.path));
   const orphans = Object.keys(manifest?.managedFiles ?? {}).filter((path) => !planned.has(path) && existsSync(join(root, path)));
-  return { root, profiles, agents, actions, orphans, skipped, previousManifest: manifest };
+  return { root, profiles, agents, actions, orphans, skipped, needs, previousManifest: manifest };
 }
 
 /** Items in the shape before 1.0.0 that an agent moves by hand: the tool never rewrites user-owned docs or tests. */
@@ -818,7 +830,29 @@ function legacyItems(root, allFiles, manifest) {
   return out;
 }
 
-function audit(root) {
+/** Numeric compare of dotted versions: 0.10.0 is newer than 0.9.0. */
+function newerVersion(left, right) {
+  const a = String(left).split('.').map(Number);
+  const b = String(right).split('.').map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) > (b[index] ?? 0);
+  }
+  return false;
+}
+
+/** The installed standard's version from <dir>/.claude-plugin/plugin.json, against the version the gates port. */
+function standardStatus(root, standardDir) {
+  const name = String(existingConfig(root)?.docsStandard?.name ?? '');
+  let installed = null;
+  if (standardDir) {
+    const path = join(resolve(String(standardDir)), '.claude-plugin', 'plugin.json');
+    if (!existsSync(path)) throw new Error(`--standard ${standardDir}: no .claude-plugin/plugin.json there. Pass the root folder of the installed standard plugin.`);
+    installed = String(readJson(path).version ?? '') || null;
+  }
+  return { name, ported: STANDARD_VERSION, installed, newer: installed ? newerVersion(installed, STANDARD_VERSION) : false };
+}
+
+function audit(root, { standard = null } = {}) {
   const allFiles = repositoryFiles(root);
   const has = (path) => existsSync(join(root, path));
   const charts = allFiles.filter((path) => basename(path) === 'Chart.yaml').map((path) => dirname(path).replaceAll('\\', '/'));
@@ -841,6 +875,7 @@ function audit(root) {
       gate: has('scripts/check-sdd.mjs'),
     },
     legacy: legacyItems(root, allFiles, readManifest(root)),
+    standard: standardStatus(root, standard),
     charts,
     configFileCount: configFiles.length,
     ci: {
@@ -872,6 +907,12 @@ function printAudit(result) {
   console.log(`Config-like files (paths containing config/): ${result.configFileCount}; Helm charts: ${result.charts.length}`);
   console.log(`Package manager: ${result.packageManager ?? 'none detected'}; CI: ${ci.length ? ci.join(', ') : 'none detected'}`);
   console.log(`Suggested profiles: ${result.suggestedProfiles.join(', ')} (core and sdd are always installed; config and helm only when useful)`);
+  if (result.standard.newer) {
+    console.log(
+      `\nWarning: the installed standard ${result.standard.installed} is newer than the ${result.standard.ported} checks these gates port. ` +
+        'Its new rules are not gated yet: run the docs audit, and update sdd-enforce when a newer version exists.',
+    );
+  }
   if (result.legacy.length) {
     console.log(`\nOld-format items (${result.legacy.length}). The gates fail on each one; move them by hand in the install change:`);
     for (const item of result.legacy) console.log(`  - ${item.path}: ${item.action}`);
@@ -908,6 +949,9 @@ function printPlan(value, asJson) {
   if (deleted.length) {
     console.log('\nRemoved (unedited, and this version no longer ships them, or no longer needed):');
     for (const action of deleted) console.log(`  - ${action.path}: ${action.reason}`);
+  }
+  if (value.needs?.length) {
+    console.log(`\nNeeds a value: ${value.needs.join(', ')}. Ask the user, set it in .agent-sdd/config.json, then run apply again.`);
   }
   if (value.skipped?.length) {
     console.log('\nNot written:');
@@ -1223,7 +1267,7 @@ async function main() {
 
   const root = repoRoot(parsed.positional[0] ?? '.');
   if (command === 'audit') {
-    const result = audit(root);
+    const result = audit(root, { standard: flag(parsed, 'standard', null) });
     if (flag(parsed, 'json', false)) console.log(JSON.stringify(result, null, 2));
     else printAudit(result);
     return;

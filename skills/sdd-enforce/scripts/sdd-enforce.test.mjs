@@ -1086,6 +1086,74 @@ test('--changed follows a moved folder like --staged does [@invariant sdd-enforc
   assert.equal(checked.status, 0, checked.stderr);
 });
 
+test('audit warns when the installed standard is newer than the ported checks [@invariant sdd-enforce.gates:V23]', () => {
+  const root = installed();
+  const config = JSON.parse(readFileSync(join(root, '.agent-sdd', 'config.json'), 'utf8'));
+  assert.deepEqual(config.docsStandard, { name: '', version: '0.9.0' });
+
+  const standard = mkdtempSync(join(tmpdir(), 'sdd-enforce-standard-'));
+  fixtures.push(standard);
+  mkdirSync(join(standard, '.claude-plugin'), { recursive: true });
+  const pluginJson = join(standard, '.claude-plugin', 'plugin.json');
+  writeFileSync(pluginJson, '{ "name": "docs-standard", "version": "0.10.0" }\n', 'utf8');
+  let audited = run(['audit', root, '--standard', standard]);
+  assert.equal(audited.status, 0, audited.stderr);
+  assert.match(audited.stdout, /installed standard 0\.10\.0 is newer than the 0\.9\.0 checks/);
+  assert.equal(JSON.parse(run(['audit', root, '--standard', standard, '--json']).stdout).standard.newer, true);
+
+  // Versions compare by number: 0.9.0 is not newer than 0.9.0, and 0.10.0 is newer than 0.9.0.
+  writeFileSync(pluginJson, '{ "name": "docs-standard", "version": "0.9.0" }\n', 'utf8');
+  audited = run(['audit', root, '--standard', standard]);
+  assert.doesNotMatch(audited.stdout, /is newer than/);
+});
+
+test('plan lists the values apply needs from the user [@invariant sdd-enforce.gates:V23]', () => {
+  const root = fixture();
+  let planned = run(['plan', root]);
+  assert.equal(planned.status, 0, planned.stderr);
+  assert.match(planned.stdout, /Needs a value: docsStandardLine, docsStandard\.name/);
+
+  assert.equal(run(['apply', root, '--write']).status, 0);
+  const configPath = join(root, '.agent-sdd', 'config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  config.docsStandardLine = 'Where each doc goes: [the docs standard](https://example.invalid/map.md).';
+  config.docsStandard.name = 'docs-standard';
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  planned = run(['plan', root, '--allow-dirty']);
+  assert.doesNotMatch(planned.stdout, /Needs a value/);
+  assert.equal(JSON.parse(readFileSync(configPath, 'utf8')).docsStandard.name, 'docs-standard');
+});
+
+// The organization words, kept as SHA-256 hashes so that this public file does not name them. A word inside a
+// hyphenated name such as SPEC-FIRST-WORKFLOW.md is part of that name; a host word counts inside one.
+const ORGANIZATION_WORD_HASHES = new Set([
+  '7a4e79b4c3c40e092a844990ecd90e892ab1c79e7a08c4c142846ca9a973e932',
+  '161e1b715ab0517df1a8c50d4bfac3922ceadb29530a86de6a97bb865549b767',
+  'eb202c5787c9604fc7ad2b6811d4cc62dee4591c2125a3109b43aa420c0a46e1',
+  '267d3b81a9dcd937f3b46a17a57fc0ca2133373389336861142673a73fc17bc6',
+]);
+
+function namesAnOrganization(text) {
+  for (const [token] of text.matchAll(/[A-Za-z0-9.-]+/g)) {
+    const word = token.replace(/^[.-]+|[.-]+$/g, '');
+    const exact = [word, ...word.split('.')];
+    const lower = [...exact, ...word.split(/[-.]/)].map((item) => item.toLowerCase());
+    if ([...exact, ...lower].some((item) => ORGANIZATION_WORD_HASHES.has(sha256(item)))) return true;
+  }
+  return false;
+}
+
+test('no template, skill doc or reference names an organization', () => {
+  const roots = ['assets', 'references', 'SKILL.md', 'README.md', 'agents'].map((item) => join(SKILL_ROOT, item));
+  const offenders = [];
+  const visit = (path) => {
+    if (statSync(path).isDirectory()) for (const name of readdirSync(path)) visit(join(path, name));
+    else if (namesAnOrganization(readFileSync(path, 'utf8'))) offenders.push(relative(SKILL_ROOT, path));
+  };
+  for (const path of roots) if (existsSync(path)) visit(path);
+  assert.deepEqual(offenders, []);
+});
+
 test('docs/map.md holds the rows the tool adds, in a block that merge and uninstall respect [@invariant sdd-enforce.gates:V19]', () => {
   const lean = fixture();
   assert.equal(run(['apply', lean, '--write', '--agents', 'claude']).status, 0);

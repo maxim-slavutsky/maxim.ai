@@ -27,6 +27,7 @@ critical:
   - V20
   - V21
   - V22
+  - V23
 ---
 
 # sdd-enforce installer and gates
@@ -168,3 +169,8 @@ workspace's own `AGENTS.md` for a contract in `<workspace>/docs/`, any `AGENTS.m
 V22: `scripts/check-sdd.mjs` fails on a `.claude/rules/<n>.md` without `paths:`, and, with Claude Code and Codex or
 Cursor enabled, on a rule without its `.agents/skills/<n>` twin. `--changed` lists a moved file under its new path
 only, as `--staged` does, so a commit that moves a folder together with its doc passes in both modes.
+
+V23: Apply writes `docsStandard` to `.agent-sdd/config.json`: the user's `name`, kept across applies, and the
+standard version the gates port. `plan` names each empty value the user must give: `docsStandardLine` and
+`docsStandard.name`. `audit --standard <dir>` reads the version in `<dir>/.claude-plugin/plugin.json` and warns
+when it is newer than the ported version, comparing the numbers of each part.
