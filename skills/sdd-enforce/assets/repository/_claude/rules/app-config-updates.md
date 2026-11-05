@@ -1,7 +1,6 @@
 ---
 name: Runtime application config parity
 description: Adding, removing, or renaming a runtime config key: update every surface (validator, local and shipped copies, test fixtures, chart config, values placeholders, typed reader, doc of record) in the same change.
-type: feedback
 paths:
   - "**/config/**"
   - "**/configs/**"

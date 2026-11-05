@@ -1,7 +1,6 @@
 ---
 name: Agent parity
 description: Editing a rule, skill, hook config, or concern doc of a coding agent: the partner files of every enabled agent change in the same commit; regenerate the Cursor copies after a rule edit.
-type: feedback
 paths:
   - ".claude/**"
   - ".codex/**"

@@ -73,7 +73,7 @@ Ownership of a runtime file (`Doc-Impact` gate):
 
 | Case | Owner |
 |---|---|
-| One or more docs of record have a `covers:` glob that matches the file | every such doc |
+| A doc of record has a `code:` folder that holds the file | the doc with the longest such folder |
 | No doc matches, root is `apps`, `packages`, `services`, or `modules` | `<root>/<workspace>/AGENTS.md` |
 | No doc matches, other root (`src`) | `<root>/AGENTS.md` |
 
@@ -82,12 +82,12 @@ Runtime file = under a runtime root, runtime extension, not a test (`*.test.*`, 
 
 Doc of record placement:
 
-| `covers:` globs | Path | Linked from |
-|---|---|---|
-| all inside one workspace | `<workspace>/docs/<module>.md` | nearest `AGENTS.md` above that `docs/` folder |
-| span workspaces | `docs/<module>.md` | root `AGENTS.md` |
+| `code:` folder | Path | Listed in | Index linked from |
+|---|---|---|---|
+| inside a workspace | `<workspace>/docs/<module>.md` | `<workspace>/docs/README.md` | nearest `AGENTS.md` above that `docs/` folder |
+| in no workspace | `docs/<module>.md` | `docs/README.md` | root `AGENTS.md` |
 
-A doc in `<workspace>/docs/` with a glob outside that workspace fails. Full shape: `docs/doc-of-record.md` in the
+A doc in `<workspace>/docs/` with a folder outside that workspace fails. Full shape: `docs/doc-of-record.md` in the
 target repository.
 
 `check-docs` also demands an `AGENTS.md` in every workspace: a direct child of a runtime root that carries a
