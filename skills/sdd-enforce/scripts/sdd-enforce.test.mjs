@@ -156,6 +156,10 @@ const LEGACY_06_FILES = {
   '.claude/rules/spec-first.md': '---\ndescription: old\npaths:\n  - "src/**"\n---\n\n# SPEC-first\n',
   '.cursor/rules/spec-first.mdc': '---\ndescription: old\n---\n',
   '.claude/rules/finishing-branch-commit-order.md': '---\ndescription: old\n---\n\n# Flush the log\n',
+};
+
+/** Files a 0.6.0 install generated under a name 1.0.0 still ships: the upgrade rewrites them. */
+const UPGRADED_06_FILES = {
   '.claude/skills/commit-changes/SKILL.md': '---\nname: commit-changes\ndescription: old\n---\n',
   '.agents/skills/commit-changes/SKILL.md': '---\nname: commit-changes\ndescription: old\n---\n',
   '.agents/skills/commit-changes/agents/openai.yaml': 'interface:\n  display_name: "Commit changes"\n',
@@ -167,7 +171,7 @@ function legacy06Installed({ editCommitWorkflow = false } = {}) {
   const manifestPath = join(root, '.agent-toolchain.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   manifest.generator.version = '0.6.0';
-  for (const [path, content] of Object.entries(LEGACY_06_FILES)) {
+  for (const [path, content] of Object.entries({ ...LEGACY_06_FILES, ...UPGRADED_06_FILES })) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), content, 'utf8');
     manifest.managedFiles[path] = { kind: 'generated', mode: 'created', sha256: sha256(content) };
@@ -276,8 +280,8 @@ test('apply is idempotent, follows rule-vs-skill ownership, and verifies', () =>
   assert.equal(existsSync(join(root, '.claude', 'skills', 'agent-parity')), false);
   assert.match(readFileSync(join(root, '.claude', 'rules', 'doc-of-record.md'), 'utf8'), /paths:\n  - "src\/\*\*"\n/);
   // Procedure: Claude skill + twin that links it.
-  assert.ok(existsSync(join(root, '.claude', 'skills', 'committing-changes', 'SKILL.md')));
-  assert.match(readFileSync(join(root, '.agents', 'skills', 'committing-changes', 'SKILL.md'), 'utf8'), /\.claude\/skills\/committing-changes\/SKILL\.md/);
+  assert.ok(existsSync(join(root, '.claude', 'skills', 'commit-changes', 'SKILL.md')));
+  assert.match(readFileSync(join(root, '.agents', 'skills', 'commit-changes', 'SKILL.md'), 'utf8'), /\.claude\/skills\/commit-changes\/SKILL\.md/);
   for (const name of readdirSync(join(root, '.agents', 'skills'))) {
     assert.ok(existsSync(join(root, '.agents', 'skills', name, 'agents', 'openai.yaml')), `${name} openai.yaml`);
   }
@@ -597,16 +601,16 @@ test('waivers skip a named commit in --changed mode only [@invariant sdd-enforce
 
 test('adapters need Codex metadata and the right links: rule to concern doc and back, twin to skill [@invariant sdd-enforce.gates:V5]', () => {
   const root = installed();
-  rmSync(join(root, '.agents', 'skills', 'committing-changes', 'agents'), { recursive: true });
+  rmSync(join(root, '.agents', 'skills', 'commit-changes', 'agents'), { recursive: true });
   let checked = gate(root);
   assert.notEqual(checked.status, 0);
-  assert.match(checked.stderr, /committing-changes lacks agents\/openai\.yaml/);
+  assert.match(checked.stderr, /commit-changes lacks agents\/openai\.yaml/);
   git(root, ['checkout', '--', '.']);
 
-  const twin = join(root, '.agents', 'skills', 'committing-changes', 'SKILL.md');
-  writeFileSync(twin, readFileSync(twin, 'utf8').replace(/\[committing-changes\]\([^)]+\)/, 'the Claude skill'), 'utf8');
+  const twin = join(root, '.agents', 'skills', 'commit-changes', 'SKILL.md');
+  writeFileSync(twin, readFileSync(twin, 'utf8').replace(/\[commit-changes\]\([^)]+\)/, 'the Claude skill'), 'utf8');
   checked = gate(root);
-  assert.match(checked.stderr, /\.agents\/skills\/committing-changes\/SKILL\.md does not link \.claude\/skills\/committing-changes\/SKILL\.md/);
+  assert.match(checked.stderr, /\.agents\/skills\/commit-changes\/SKILL\.md does not link \.claude\/skills\/commit-changes\/SKILL\.md/);
   git(root, ['checkout', '--', '.']);
 
   const ruleTwin = join(root, '.agents', 'skills', 'doc-of-record', 'SKILL.md');
@@ -883,12 +887,16 @@ test('upgrade from 0.6.0 removes retired files, the CLAUDE.md import and the .gi
   for (const path of [...Object.keys(LEGACY_06_FILES), 'CLAUDE.md', '.gitignore']) {
     assert.match(planned.stdout, new RegExp(`delete\\s+${path.replace(/[.]/g, '\\.')}`), `${path} deleted`);
   }
+  for (const path of Object.keys(UPGRADED_06_FILES)) {
+    assert.match(planned.stdout, new RegExp(`update-generated\\s+${path.replace(/[.]/g, '\\.')}`), `${path} upgraded`);
+  }
   assert.match(planned.stdout, /update\s+AGENTS\.md/);
   assert.match(planned.stdout, /create\s+docs\/map\.md/);
 
   const applied = run(['apply', root, '--write']);
   assert.equal(applied.status, 0, applied.stderr);
   for (const path of [...Object.keys(LEGACY_06_FILES), 'CLAUDE.md', '.gitignore']) assert.equal(existsSync(join(root, path)), false, `${path} gone`);
+  assert.match(readFileSync(join(root, '.claude', 'skills', 'commit-changes', 'SKILL.md'), 'utf8'), /^disable-model-invocation: true$/m);
   assert.equal(readFileSync(join(root, 'AGENTS.md'), 'utf8'), `# Repository agent instructions\n\n${POINTER}\n`);
   for (const path of ['.claude/settings.json', '.codex/hooks.json', '.cursor/hooks.json']) {
     const body = readFileSync(join(root, path), 'utf8');
@@ -1154,6 +1162,21 @@ test('no template, skill doc or reference names an organization', () => {
   assert.deepEqual(offenders, []);
 });
 
+test('a people-started skill has an imperative name and disable-model-invocation, a model skill a trigger-first description', () => {
+  const root = fixture();
+  const applied = run(['apply', root, '--write', '--profiles', 'core,sdd,helm']);
+  assert.equal(applied.status, 0, applied.stderr);
+  const commit = readFileSync(join(root, '.claude', 'skills', 'commit-changes', 'SKILL.md'), 'utf8');
+  assert.match(commit, /^disable-model-invocation: true$/m);
+  assert.match(commit, /^description: Use when the user asks to commit/m);
+  assert.match(commit, /git diff/);
+  assert.equal(existsSync(join(root, '.claude', 'skills', 'committing-changes')), false);
+  assert.ok(existsSync(join(root, '.agents', 'skills', 'commit-changes', 'SKILL.md')));
+  for (const path of ['.claude/skills/validating-helm-charts/SKILL.md', '.agents/skills/validating-helm-charts/SKILL.md']) {
+    assert.match(readFileSync(join(root, path), 'utf8'), /^description: Use (before|when) /m, path);
+  }
+});
+
 test('docs/map.md holds the rows the tool adds, in a block that merge and uninstall respect [@invariant sdd-enforce.gates:V19]', () => {
   const lean = fixture();
   assert.equal(run(['apply', lean, '--write', '--agents', 'claude']).status, 0);
@@ -1205,7 +1228,7 @@ test('a hook config change needs every other enabled hook config, never itself; 
   assert.equal(checked.status, 0, checked.stderr);
 
   git(root, ['reset', '-q', '--hard']);
-  for (const path of ['.claude/hooks/post-edit-reminder.mjs', '.claude/skills/committing-changes/SKILL.md', '.agents/skills/committing-changes/SKILL.md']) {
+  for (const path of ['.claude/hooks/post-edit-reminder.mjs', '.claude/skills/commit-changes/SKILL.md', '.agents/skills/commit-changes/SKILL.md']) {
     writeFileSync(join(root, path), `${readFileSync(join(root, path), 'utf8')}\n<!-- note -->\n`, 'utf8');
     git(root, ['add', path]);
     checked = gate(root, ['--staged', '--commit-msg', message]);

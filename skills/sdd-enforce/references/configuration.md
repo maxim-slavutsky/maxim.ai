@@ -6,7 +6,7 @@ Read when choosing profiles, interpreting CLI output, or configuring generated g
 
 | Profile | Installs | Selection rule |
 |---|---|---|
-| `core` | `docs/agent-parity.md` (with the rules index), `agent-parity` rule + adapter, `committing-changes` skill + twin, docs gate `scripts/check-docs.mjs`, SDD gate `scripts/check-sdd.mjs`, shared gate lib `scripts/sdd-lib.mjs`, Cursor rule generator, post-edit reminder `.claude/hooks/post-edit-reminder.mjs`, hook configs, `docs/map.md` block | Required base |
+| `core` | `docs/agent-parity.md` (with the rules index), `agent-parity` rule + adapter, `commit-changes` skill + twin, docs gate `scripts/check-docs.mjs`, SDD gate `scripts/check-sdd.mjs`, shared gate lib `scripts/sdd-lib.mjs`, Cursor rule generator, post-edit reminder `.claude/hooks/post-edit-reminder.mjs`, hook configs, `docs/map.md` block | Required base |
 | `sdd` | `docs/doc-of-record.md`, `doc-of-record` rule + adapter, doc-of-record + evidence + `Doc-Impact` checks, `AGENTS.md` pointer line | Required base |
 | `config` | `docs/app-config.md`, `app-config-updates` rule + adapter, configured surface propagation check | Runtime config has several copies, schemas, or readers |
 | `helm` | `docs/helm-validation.md`, `validating-helm-charts` skill + twin | Repository owns Helm charts |
@@ -19,7 +19,7 @@ profile only to make the installation look complete.
 | Concern kind | Claude Code | Codex + Cursor |
 |---|---|---|
 | Path-scoped rule (`doc-of-record`, `agent-parity`, `app-config-updates`) | `.claude/rules/<name>.md`: frontmatter `description` + `paths`; body = heading, one link to the concern doc, 3-6 short imperatives | `.agents/skills/<name>/SKILL.md` that links the same concern doc + `agents/openai.yaml`; Cursor also auto-attaches generated `.cursor/rules/<name>.mdc` |
-| Procedure (`committing-changes`, `validating-helm-charts`) | `.claude/skills/<name>/SKILL.md` holds the steps | `.agents/skills/<name>/SKILL.md` links the Claude skill and copies no step + `agents/openai.yaml` |
+| Procedure (`commit-changes`, `validating-helm-charts`) | `.claude/skills/<name>/SKILL.md` holds the steps | `.agents/skills/<name>/SKILL.md` links the Claude skill and copies no step + `agents/openai.yaml` |
 | Rules index | table in `docs/agent-parity.md` (Rules index), rendered at apply from the shipped rules | same file |
 
 - One concern = a rule or a skill, never both. The gate accepts either as the Claude counterpart of

@@ -1,9 +1,10 @@
 ---
-name: committing-changes
-description: Validate and commit the current work when the user asks to commit, finish or hand over the work - tests, build and lint of the affected workspaces, the owner-doc check, the gate trailers, exact staging, and the commit.
+name: commit-changes
+description: Use when the user asks to commit, finish or hand over the current work. Runs the tests, build and lint of the affected workspaces, the owner-doc check and the gate trailers, writes the message from git diff, stages exactly and commits.
+disable-model-invocation: true
 ---
 
-# Committing changes
+# Commit changes
 
 The steps below are the only commit path of the repository. Do not commit, push or merge unless the user
 asked for that action. Commit preparation never allows a push, a pull request, a merge or a branch delete.
@@ -40,7 +41,7 @@ its own context small.
     subagent_type: "general-purpose",
     model: "sonnet",
     description: "commit changes",
-    prompt: "You ARE the delegated sub-agent: run every step of .claude/skills/committing-changes/SKILL.md yourself and do NOT spawn another agent. The session changed these files: <paths, one per line>. Intent: <one line per change group, with Doc-Impact changed or none - reason>. Run the affected tests, builds and lint through the cached task runner in ONE call with a concurrency cap and errors-only output (tool timeout 600 s). Validate touched Helm charts INLINE. Do the targeted owner-doc check, run the gates, write the message to a scratch file, stage only the listed and clearly incidental files, pre-validate the message with the commit linter and check-sdd --staged in the same call, then commit with git commit -F (tool timeout 300 s). Other dirty files: EXCLUDE them, list them in the report, never edit them. A failing test, build, gate or chart: STOP and report. Report: commit hash and subject, what ran per workspace (ran / cache hit / stub / skipped), chart result, owner docs edited, excluded paths."
+    prompt: "You ARE the delegated sub-agent: run every step of .claude/skills/commit-changes/SKILL.md yourself and do NOT spawn another agent. The session changed these files: <paths, one per line>. Intent: <one line per change group, with Doc-Impact changed or none - reason>. Run the affected tests, builds and lint through the cached task runner in ONE call with a concurrency cap and errors-only output (tool timeout 600 s). Validate touched Helm charts INLINE. Do the targeted owner-doc check, run the gates, write the message to a scratch file, stage only the listed and clearly incidental files, pre-validate the message with the commit linter and check-sdd --staged in the same call, then commit with git commit -F (tool timeout 300 s). Other dirty files: EXCLUDE them, list them in the report, never edit them. A failing test, build, gate or chart: STOP and report. Report: commit hash and subject, what ran per workspace (ran / cache hit / stub / skipped), chart result, owner docs edited, excluded paths."
   )
   ```
 

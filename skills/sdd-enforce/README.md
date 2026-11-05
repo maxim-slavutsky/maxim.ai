@@ -153,7 +153,7 @@ With the default profiles (`core,sdd`) and all three tools:
 | `.claude/rules/doc-of-record.md`, `.claude/rules/agent-parity.md` | Claude Code path rules. Each rule holds three to six short imperatives and one link to its concern doc. The `doc-of-record` rule loads for files under your `runtimeRoots`. | Claude Code |
 | `.cursor/rules/*.mdc` | The same rules for Cursor, generated from `.claude/rules` by `scripts/gen-cursor-rules.mjs`. Never edit them by hand. | Cursor |
 | `.agents/skills/<name>/` | Codex and Cursor adapters, each with `agents/openai.yaml` display metadata. The adapter of a rule links the same concern doc as the rule. The twin of a skill links the Claude skill. | Codex, Cursor |
-| `.claude/skills/committing-changes/` | The commit skill: tests, the owner-doc check, the gate trailers, exact staging, and the commit. It works from `git status` and `git diff`. | Claude Code, and Codex and Cursor through its twin |
+| `.claude/skills/commit-changes/` | The commit skill: tests, the owner-doc check, the gate trailers, exact staging, and the commit. It works from `git status` and `git diff`. | Claude Code, and Codex and Cursor through its twin |
 | `.claude/settings.json`, `.codex/hooks.json`, `.cursor/hooks.json` | One post-edit hook entry per tool. Your other settings stay. | each tool |
 | `.claude/hooks/post-edit-reminder.mjs` | The hook script. After the AI edits a file, it reminds the AI to update each doc of record that covers the file and to run the gate. | each tool |
 | `scripts/check-docs.mjs` | The docs gate: the docs exist, other docs link them, and they follow the docs standard. See [Gate reference](#gate-reference). | Git hooks, CI, people |
@@ -395,7 +395,7 @@ What `apply` does for you:
   `commit-changes`, and `validate-helm-charts` skills and adapters.
 - It writes the new files in their place: `docs/doc-of-record.md`, `docs/agent-parity.md`,
   `docs/app-config.md`, `docs/helm-validation.md`, the `doc-of-record` rule and adapter, the
-  `committing-changes` and `validating-helm-charts` skills, `.claude/hooks/post-edit-reminder.mjs`, and
+  `commit-changes` and `validating-helm-charts` skills, `.claude/hooks/post-edit-reminder.mjs`, and
   `scripts/sdd-lib.mjs`.
 - It replaces the line `@./docs/workflows/SPEC-FIRST-WORKFLOW.md` in `AGENTS.md` with the pointer line. Your
   other text stays.

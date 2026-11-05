@@ -69,7 +69,7 @@ Arguments: `$ARGUMENTS`
      commit-msg, and in CI both static commands and `--changed` (static alone never inspects a commit). Call `node`
      directly, not through a package-manager wrapper;
    - regenerate `.cursor/rules/*.mdc` with `node scripts/gen-cursor-rules.mjs` after any `.claude/rules` edit;
-   - fill the workspace filter table in `.claude/skills/committing-changes/SKILL.md`, the surfaces table in
+   - fill the workspace filter table in `.claude/skills/commit-changes/SKILL.md`, the surfaces table in
      `docs/app-config.md`, and the rules index rows for repository-specific rules in `docs/agent-parity.md`;
    - update package-manager aliases only when useful.
 7. Run `verify` (runs both gates), and repository-native tests. Report remaining manual migration debt.
