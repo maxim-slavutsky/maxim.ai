@@ -999,6 +999,47 @@ test('check-docs fails on each migration detect hit and names the migration and 
   assert.equal(checked.status, 0, checked.stderr);
 });
 
+test('check-docs fails on an ADR status form, a one-sided supersession, a bare research note, an open box and an unlinked contract [@invariant sdd-enforce.gates:V21]', () => {
+  const root = installed();
+  const write = (path, body) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body, 'utf8');
+  };
+  const adr = (status, body = '') => `---\nstatus: '${status}'\n---\n\n# A decision\n\nDecided 2026-01-01 (T-1). ${body}\n`;
+  write('docs/adr/0001-x.md', adr('proposed'));
+  let checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /docs\/adr\/0001-x\.md: status "proposed" is not a standard form/);
+
+  write('docs/adr/0001-x.md', adr('superseded by ADR-0002 (y, 2026-02-01)'));
+  write('docs/adr/0002-y.md', adr('accepted'));
+  checked = docsGate(root);
+  assert.match(checked.stderr, /docs\/adr\/0002-y\.md does not name ADR-0001/);
+
+  // Two superseding ADRs in one status, each naming the old one in its own way.
+  write('docs/adr/0001-x.md', adr('superseded in part by ADR-0002 (a, 2026-01-01) and ADR-0003 (b, 2026-02-01)'));
+  write('docs/adr/0002-y.md', adr('accepted', 'It builds on ADR-0001.'));
+  write('docs/adr/0003-z.md', adr('accepted', 'It replaces part of [ADR 0001](0001-x.md).\n\n- [ ] an old line, kept with its date'));
+  write('docs/research/q.md', '# Q\n');
+  write('docs/agent-parity.md', `${readFileSync(join(root, 'docs', 'agent-parity.md'), 'utf8')}\n\`\`\`text\n- [ ] an example inside a fence\n\`\`\`\n`);
+  write('docs/doc-of-record.md', `${readFileSync(join(root, 'docs', 'doc-of-record.md'), 'utf8')}\n- [ ] later\n`);
+  write('apps/api/package.json', '{ "name": "api" }\n');
+  write('apps/api/AGENTS.md', '# api\n');
+  write('apps/api/docs/orders-contract.md', '# Orders contract\n');
+  checked = docsGate(root);
+  assert.doesNotMatch(checked.stderr, /docs\/adr\//);
+  assert.match(checked.stderr, /docs\/research\/q\.md needs frontmatter "date:"/);
+  assert.match(checked.stderr, /docs\/doc-of-record\.md:\d+: an open check box/);
+  assert.doesNotMatch(checked.stderr, /agent-parity\.md:\d+: an open check box/);
+  assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/docs\/orders-contract\.md/);
+
+  write('docs/research/q.md', '---\ndate: 2026-01-01\nquestion: Why is it slow?\n---\n\n# Q\n\nThe cache is cold.\n\n## Findings\n\n- One miss per call.\n\n## Not covered\n\n- Load.\n');
+  write('docs/doc-of-record.md', readFileSync(join(root, 'docs', 'doc-of-record.md'), 'utf8').replace('\n- [ ] later\n', '\n'));
+  write('apps/api/AGENTS.md', '# api\n\n- [orders contract](docs/orders-contract.md): the order wire\n');
+  checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
 test('docs/map.md holds the rows the tool adds, in a block that merge and uninstall respect [@invariant sdd-enforce.gates:V19]', () => {
   const lean = fixture();
   assert.equal(run(['apply', lean, '--write', '--agents', 'claude']).status, 0);

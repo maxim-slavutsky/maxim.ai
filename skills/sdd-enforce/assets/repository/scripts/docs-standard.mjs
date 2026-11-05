@@ -1,12 +1,12 @@
 /**
  * The checks of the docs standard that a script can decide, for scripts/check-docs.mjs: where docs live, how they
- * are named, how large agent docs grow, and each migration's detect check. A migration that needs a reader's
- * judgment stays out; the docs audit asks it.
+ * are named, how large agent docs grow, the ADR status, research notes, open check boxes, contract links, and each
+ * migration's detect check. A migration that needs a reader's judgment stays out; the docs audit asks it.
  *
  * Test fixtures (any path under evals/, fixture/, fixtures/, __fixtures__/ or testdata/) are outside every check,
  * as in the audit. docs/map.md is outside the migration checks: it names the old homes on purpose.
  */
-import { basename, dirname } from 'node:path';
+import { basename, dirname, posix } from 'node:path';
 import { frontmatter, frontmatterList, frontmatterScalar, matchesGlob } from './sdd-lib.mjs';
 
 const MAX_AGENTS_LINES = 200;
@@ -117,8 +117,115 @@ export function standardProblems({ files, read, isIgnored = () => false }) {
     }
   }
 
+  problems.push(...adrProblems(inScope, read));
+  problems.push(...researchNoteProblems(inScope, read));
+  problems.push(...openBoxProblems(inScope, read));
+  problems.push(...contractProblems(inScope, read));
   problems.push(...migrationProblems(inScope, read, isIgnored));
   return problems;
+}
+
+/** Repo-relative targets of the relative Markdown links in `path`, without anchors; escapes decoded. */
+function linksIn(path, read) {
+  const out = new Set();
+  for (const match of read(path).matchAll(/\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
+    let target = match[1].replace(/^<|>$/g, '').split('#')[0].split('?')[0];
+    if (!target || /^[a-z]+:/i.test(target)) continue;
+    try {
+      target = decodeURIComponent(target);
+    } catch {
+      // A bad escape stays literal and names no file.
+    }
+    out.add(posix.normalize(posix.join(posix.dirname(path), target)));
+  }
+  return out;
+}
+
+const ADR_FILE = /(?:^|\/)docs\/adr\/(\d{4})-[^/]+\.md$/;
+const ADR_STATUS = /^(?:accepted(?: \(.+\))?|superseded(?: in part)? by ADR-\d{4} \([^)]*\)(?: and ADR-\d{4} \([^)]*\))*)$/;
+
+/** Each ADR has a status in one of the standard's forms, and each ADR its status names exists and names it back. */
+function adrProblems(files, read) {
+  const out = [];
+  const adrs = files.filter((path) => ADR_FILE.test(path));
+  for (const path of adrs) {
+    const block = frontmatter(read(path));
+    const status = block ? frontmatterScalar(block, 'status') : null;
+    if (!status) {
+      out.push(`${path} has no "status:" in its frontmatter. Add status: 'accepted', or the superseded form that names the later ADR.`);
+      continue;
+    }
+    if (!ADR_STATUS.test(status)) {
+      out.push(`${path}: status "${status}" is not a standard form. Use 'accepted', 'superseded by ADR-NNNN (<what>, <date>)' or 'superseded in part by ADR-NNNN (<what>, <date>)', several joined with " and ".`);
+      continue;
+    }
+    const number = path.match(ADR_FILE)[1];
+    for (const [, later] of status.matchAll(/ADR-(\d{4})/g)) {
+      const laterPath = adrs.find((item) => item.match(ADR_FILE)[1] === later && dirname(item) === dirname(path));
+      if (!laterPath) {
+        out.push(`${path}: the status names ADR-${later}, which does not exist. Fix the number, or write that ADR.`);
+        continue;
+      }
+      const body = read(laterPath);
+      const named = new RegExp(`ADR[- ]${number}\\b`).test(body) || linksIn(laterPath, read).has(path);
+      if (!named) {
+        out.push(`${laterPath} does not name ADR-${number}, which its status says it supersedes. Name ADR-${number} in its first paragraph.`);
+      }
+    }
+  }
+  return out;
+}
+
+/** A research note has its date and question in frontmatter, and the Findings and Not covered sections. */
+function researchNoteProblems(files, read) {
+  const out = [];
+  for (const path of files.filter((item) => /(?:^|\/)docs\/research\/[^/]+\.md$/.test(item) && basename(item) !== 'README.md')) {
+    const body = read(path);
+    const block = frontmatter(body);
+    const date = block ? frontmatterScalar(block, 'date') : null;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) out.push(`${path} needs frontmatter "date:" as YYYY-MM-DD, the day the findings were true.`);
+    if (!block || !frontmatterScalar(block, 'question')) out.push(`${path} needs frontmatter "question:", the one question the note answers.`);
+    for (const heading of ['## Findings', '## Not covered']) {
+      if (!body.split('\n').some((line) => line.trim() === heading)) out.push(`${path} needs a "${heading}" section.`);
+    }
+  }
+  return out;
+}
+
+/** An open check box in a living doc is open work, which belongs in the issue tracker. Fenced examples do not count. */
+function openBoxProblems(files, read) {
+  const out = [];
+  for (const path of files.filter((item) => item.endsWith('.md') && isLivingDoc(item))) {
+    let fenced = false;
+    read(path).split('\n').forEach((line, index) => {
+      if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced;
+      else if (!fenced && /^\s*[-*] \[ \]/.test(line)) {
+        out.push(`${path}:${index + 1}: an open check box is open work. A living doc states the current code: move the item to the issue tracker and delete the line.`);
+      }
+    });
+  }
+  return out;
+}
+
+/**
+ * An API contract is linked from the AGENTS.md of the workspace that holds it. A contract in the root docs/ is
+ * shared, so at least one AGENTS.md links it; which ones read the wire is a judgment the audit makes.
+ */
+function contractProblems(files, read) {
+  const out = [];
+  const agentsFiles = files.filter((path) => basename(path) === 'AGENTS.md');
+  for (const path of files.filter((item) => /(?:^|\/)docs\/[^/]+-contract\.md$/.test(item))) {
+    const workspace = dirname(dirname(path));
+    if (workspace !== '.') {
+      const agents = `${workspace}/AGENTS.md`;
+      if (!files.includes(agents) || !linksIn(agents, read).has(path)) {
+        out.push(`${agents} does not link ${path}. Each workspace that serves or reads a wire links its API contract from its AGENTS.md.`);
+      }
+    } else if (!agentsFiles.some((agents) => linksIn(agents, read).has(path))) {
+      out.push(`${path}: no AGENTS.md links this API contract. Link it from the AGENTS.md of each workspace that serves or reads the wire.`);
+    }
+  }
+  return out;
 }
 
 function skillProblems(path, body) {
