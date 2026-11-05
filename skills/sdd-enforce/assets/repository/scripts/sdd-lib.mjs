@@ -152,15 +152,22 @@ export function docsOfRecord(root, files) {
 }
 
 /**
- * Folders that the rows of `docs/map.md` declare as a home: each backticked path ending in "/" in the second
- * column ("It goes in") of a table row. A home outside the standard's homes passes the gates only when declared.
+ * Folders that the rows of `docs/map.md` declare as a home, read from the backticked paths in the second column
+ * ("It goes in") of a table row: a path ending in "/" is the folder itself, and a file pattern such as
+ * `docs/workflows/<name>.md` names its folder. A home outside the standard's homes passes the gates only when
+ * declared.
  */
 export function declaredHomes(mapBody) {
   const out = new Set();
   for (const line of normalize(mapBody).split('\n')) {
     if (!line.trim().startsWith('|')) continue;
     const cells = line.split(/(?<!\\)\|/);
-    for (const match of (cells[2] ?? '').matchAll(/`([^`]+\/)`/g)) out.add(normalizeFolder(match[1]));
+    for (const [, token] of (cells[2] ?? '').matchAll(/`([^`\s]+)`/g)) {
+      if (token.endsWith('/')) out.add(normalizeFolder(token));
+      else if (/[<*]/.test(token.split('/').at(-1)) && token.includes('/') && !/[<*]/.test(token.slice(0, token.lastIndexOf('/')))) {
+        out.add(normalizeFolder(token.slice(0, token.lastIndexOf('/'))));
+      }
+    }
   }
   return [...out];
 }

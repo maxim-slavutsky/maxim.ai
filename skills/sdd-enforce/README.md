@@ -292,7 +292,7 @@ the install change must move every item.
 - a hit of a migration detect check of the docs standard: a plan file, `CONTEXT.md`, "spec of record", an ADR
   status in the body, research sent to a scratchpad, a `## Writing` section in a glossary
 - an ADR status that is not a standard form, a superseding ADR that does not name the old one, a research
-  note without its frontmatter and sections, an open check box in a living doc, and an API contract that no
+  note without its frontmatter and sections, an open check box in a doc of record, and an API contract that no
   `AGENTS.md` links
 
 `check-sdd` fails on:

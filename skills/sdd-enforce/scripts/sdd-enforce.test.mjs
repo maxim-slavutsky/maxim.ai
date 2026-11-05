@@ -1024,26 +1024,33 @@ test('check-docs fails on an ADR status form, a one-sided supersession, a bare r
   checked = docsGate(root);
   assert.match(checked.stderr, /docs\/adr\/0002-y\.md does not name ADR-0001/);
 
-  // Two superseding ADRs in one status, each naming the old one in its own way.
-  write('docs/adr/0001-x.md', adr('superseded in part by ADR-0002 (a, 2026-01-01) and ADR-0003 (b, 2026-02-01)'));
+  // Superseding ADRs in one status, each naming the old one in its own way: ADR-0001, a link, or decision D1.
+  write('docs/adr/0001-x.md', adr('superseded in part by ADR-0002 (a, 2026-01-01) and ADR-0003 (b, 2026-02-01) and ADR-0004 (c, 2026-03-01)'));
   write('docs/adr/0002-y.md', adr('accepted', 'It builds on ADR-0001.'));
   write('docs/adr/0003-z.md', adr('accepted', 'It replaces part of [ADR 0001](0001-x.md).\n\n- [ ] an old line, kept with its date'));
+  write('docs/adr/0004-w.md', adr('accepted', 'It narrows §D1 V3.'));
   write('docs/research/q.md', '# Q\n');
-  write('docs/agent-parity.md', `${readFileSync(join(root, 'docs', 'agent-parity.md'), 'utf8')}\n\`\`\`text\n- [ ] an example inside a fence\n\`\`\`\n`);
-  write('docs/doc-of-record.md', `${readFileSync(join(root, 'docs', 'doc-of-record.md'), 'utf8')}\n- [ ] later\n`);
+  // A checklist in a guide is a procedure. Only a doc of record holds no open work.
+  write('docs/agent-parity.md', `${readFileSync(join(root, 'docs', 'agent-parity.md'), 'utf8')}\nBefore you open the PR, check:\n\n- [ ] the adapter links the rule\n`);
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: '## Goal\n\nThe fixture exists.\n\n```text\n- [ ] an example inside a fence\n```\n\n- [ ] later\n' });
   write('apps/api/package.json', '{ "name": "api" }\n');
-  write('apps/api/AGENTS.md', '# api\n');
+  write('apps/api/AGENTS.md', '# api\n\n- [Docs and contracts](docs/README.md)\n');
+  write('apps/api/docs/README.md', '# api docs\n\n- [payments contract](payments-contract.md)\n');
+  write('apps/api/docs/payments-contract.md', '# Payments contract\n');
   write('apps/api/docs/orders-contract.md', '# Orders contract\n');
   checked = docsGate(root);
   assert.doesNotMatch(checked.stderr, /docs\/adr\//);
   assert.match(checked.stderr, /docs\/research\/q\.md needs frontmatter "date:"/);
-  assert.match(checked.stderr, /docs\/doc-of-record\.md:\d+: an open check box/);
+  assert.match(checked.stderr, /docs\/core\.md:\d+: an open check box/);
+  assert.equal((checked.stderr.match(/docs\/core\.md:\d+: an open check box/g) ?? []).length, 1, 'the fenced box is an example');
   assert.doesNotMatch(checked.stderr, /agent-parity\.md:\d+: an open check box/);
   assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/docs\/orders-contract\.md/);
+  // The workspace index that AGENTS.md links counts as the link to a contract.
+  assert.doesNotMatch(checked.stderr, /payments-contract/);
 
   write('docs/research/q.md', '---\ndate: 2026-01-01\nquestion: Why is it slow?\n---\n\n# Q\n\nThe cache is cold.\n\n## Findings\n\n- One miss per call.\n\n## Not covered\n\n- Load.\n');
-  write('docs/doc-of-record.md', readFileSync(join(root, 'docs', 'doc-of-record.md'), 'utf8').replace('\n- [ ] later\n', '\n'));
-  write('apps/api/AGENTS.md', '# api\n\n- [orders contract](docs/orders-contract.md): the order wire\n');
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core' });
+  write('apps/api/docs/README.md', '# api docs\n\n- [payments contract](payments-contract.md)\n- [orders contract](orders-contract.md)\n');
   checked = docsGate(root);
   assert.equal(checked.status, 0, checked.stderr);
 });
@@ -1074,7 +1081,8 @@ test('a rule may link a concern doc in a folder that docs/map.md declares [@inva
 
   // A row the repository adds names the folder; CRLF line ends read the same.
   const mapPath = join(root, 'docs', 'map.md');
-  writeFileSync(mapPath, `${readFileSync(mapPath, 'utf8')}\r\n| the policy of one workflow | \`docs/workflows/<name>.md\`, in \`docs/workflows/\` | yes | by its rule |\r\n`, 'utf8');
+  // The row names the home by its file pattern, as a person writes it; the folder of the pattern is the home.
+  writeFileSync(mapPath, `${readFileSync(mapPath, 'utf8')}\r\n| the policy of one workflow | \`docs/workflows/<name>.md\`, linked from its rule | yes | by its rule |\r\n`, 'utf8');
   checked = gate(root);
   assert.equal(checked.status, 0, checked.stderr);
 });

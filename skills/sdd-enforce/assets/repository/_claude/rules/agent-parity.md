@@ -1,6 +1,6 @@
 ---
 name: Agent parity
-description: Editing a rule, skill, hook config, or concern doc of a coding agent: the partner files of every enabled agent change in the same commit; regenerate the Cursor copies after a rule edit.
+description: Use when editing a rule, skill, hook config or concern doc of a coding agent. The partner files of every enabled agent change in the same commit. Regenerate the Cursor copies after a rule edit.
 paths:
   - ".claude/**"
   - ".codex/**"

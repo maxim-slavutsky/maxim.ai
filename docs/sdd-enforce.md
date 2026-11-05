@@ -78,7 +78,8 @@ V4: A waiver `{commit: full 40-hex SHA, gates, reason of 12 words or more}` skip
 `--staged` never reads waivers. A malformed file fails the gate.
 
 V5: Each `.claude/rules/<n>.md` links exactly one concern doc directly under a `docs/` folder, or directly under a
-`docs/` subfolder that a row of `docs/map.md` names in backticks in its second column, and that doc links the rule
+`docs/` subfolder that a row of `docs/map.md` names in backticks in its second column (the folder itself, or a
+file pattern such as `docs/workflows/<name>.md`), and that doc links the rule
 back. The back-link covers the generated `.mdc`. The `.agents/skills/<n>` twin of a Claude skill links its
 `SKILL.md`. The adapter of a rule links the rule's concern doc. With Codex enabled, each `.agents/skills/<n>` has
 `agents/openai.yaml`.
@@ -161,10 +162,12 @@ files Git ignores never hit.
 
 V21: `scripts/check-docs.mjs` fails on an ADR under `docs/adr/` without a `status:` in one of the standard's forms
 (`accepted`, `superseded by …` or `superseded in part by …`, several ADRs joined with " and "), on a status that
-names an ADR that does not exist, and on a superseding ADR that does not name the old one. It fails on a research
-note without `date:`, `question:`, `## Findings` or `## Not covered`, on an open check box outside a fenced block
-in a living doc (ADRs and research notes are not living), and on an API contract that no `AGENTS.md` links: the
-workspace's own `AGENTS.md` for a contract in `<workspace>/docs/`, any `AGENTS.md` for one in the root `docs/`.
+names an ADR that does not exist, and on a superseding ADR that does not name the old one: as `ADR-0005`,
+`ADR 5`, a link to its file, or its decision id `D5` or `§D5`. It fails on a research note without `date:`,
+`question:`, `## Findings` or `## Not covered`, and on an open check box outside a fenced block in a doc of
+record. A checklist in another doc is a procedure and passes. It fails on an API contract that no `AGENTS.md`
+links: the workspace's own `AGENTS.md`, directly or through the `docs/README.md` index it links, for a contract in
+`<workspace>/docs/`, and any `AGENTS.md` for one in the root `docs/`.
 
 V22: `scripts/check-sdd.mjs` fails on a `.claude/rules/<n>.md` without `paths:`, and, with Claude Code and Codex or
 Cursor enabled, on a rule without its `.agents/skills/<n>` twin. `--changed` lists a moved file under its new path

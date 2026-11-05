@@ -1,6 +1,6 @@
 ---
 name: Doc of record
-description: Editing code that a doc of record owns: read the doc whose code: folder holds the file first; a change to behavior, an interface or an invariant updates that doc in the same commit.
+description: Use when editing code that a doc of record owns. Read the doc whose code folder holds the file first. A change to behavior, an interface or an invariant updates that doc in the same commit.
 paths:
   - "src/**"
 ---

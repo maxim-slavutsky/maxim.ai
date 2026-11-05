@@ -7,7 +7,7 @@
  * as in the audit. docs/map.md is outside the migration checks: it names the old homes on purpose.
  */
 import { basename, dirname, posix } from 'node:path';
-import { frontmatter, frontmatterList, frontmatterScalar, matchesGlob } from './sdd-lib.mjs';
+import { docOfRecord, frontmatter, frontmatterList, frontmatterScalar, matchesGlob } from './sdd-lib.mjs';
 
 const MAX_AGENTS_LINES = 200;
 const MAX_SKILL_LINES = 500;
@@ -166,8 +166,10 @@ function adrProblems(files, read) {
         out.push(`${path}: the status names ADR-${later}, which does not exist. Fix the number, or write that ADR.`);
         continue;
       }
+      // An ADR names another as ADR-0005, ADR 5, a link to its file, or by its decision id: D5 or §D5.
+      const id = String(Number(number));
       const body = read(laterPath);
-      const named = new RegExp(`ADR[- ]${number}\\b`).test(body) || linksIn(laterPath, read).has(path);
+      const named = new RegExp(`(?:\\bADR[- ]0*${id}|(?:§|\\b)D0*${id})\\b`).test(body) || linksIn(laterPath, read).has(path);
       if (!named) {
         out.push(`${laterPath} does not name ADR-${number}, which its status says it supersedes. Name ADR-${number} in its first paragraph.`);
       }
@@ -192,15 +194,18 @@ function researchNoteProblems(files, read) {
   return out;
 }
 
-/** An open check box in a living doc is open work, which belongs in the issue tracker. Fenced examples do not count. */
+/**
+ * An open check box in a doc of record is open work, which belongs in the issue tracker. A checklist in a guide or
+ * a skill is a procedure, so other docs keep theirs. Fenced examples never count.
+ */
 function openBoxProblems(files, read) {
   const out = [];
-  for (const path of files.filter((item) => item.endsWith('.md') && isLivingDoc(item))) {
+  for (const path of files.filter((item) => item.endsWith('.md') && isLivingDoc(item) && docOfRecord(item, read(item)))) {
     let fenced = false;
     read(path).split('\n').forEach((line, index) => {
       if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced;
       else if (!fenced && /^\s*[-*] \[ \]/.test(line)) {
-        out.push(`${path}:${index + 1}: an open check box is open work. A living doc states the current code: move the item to the issue tracker and delete the line.`);
+        out.push(`${path}:${index + 1}: an open check box is open work. A doc of record states the current code: move the item to the issue tracker and delete the line.`);
       }
     });
   }
@@ -208,8 +213,9 @@ function openBoxProblems(files, read) {
 }
 
 /**
- * An API contract is linked from the AGENTS.md of the workspace that holds it. A contract in the root docs/ is
- * shared, so at least one AGENTS.md links it; which ones read the wire is a judgment the audit makes.
+ * An API contract is linked from the AGENTS.md of the workspace that holds it, directly or through the docs/README.md
+ * index that the AGENTS.md links. A contract in the root docs/ is shared, so at least one AGENTS.md links it; which
+ * ones read the wire is a judgment the audit makes.
  */
 function contractProblems(files, read) {
   const out = [];
@@ -218,7 +224,10 @@ function contractProblems(files, read) {
     const workspace = dirname(dirname(path));
     if (workspace !== '.') {
       const agents = `${workspace}/AGENTS.md`;
-      if (!files.includes(agents) || !linksIn(agents, read).has(path)) {
+      const index = `${dirname(path)}/README.md`;
+      const agentsLinks = files.includes(agents) ? linksIn(agents, read) : new Set();
+      const viaIndex = agentsLinks.has(index) && files.includes(index) && linksIn(index, read).has(path);
+      if (!agentsLinks.has(path) && !viaIndex) {
         out.push(`${agents} does not link ${path}. Each workspace that serves or reads a wire links its API contract from its AGENTS.md.`);
       }
     } else if (!agentsFiles.some((agents) => linksIn(agents, read).has(path))) {
