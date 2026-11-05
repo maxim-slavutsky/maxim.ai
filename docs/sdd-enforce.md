@@ -1,9 +1,6 @@
 ---
 id: sdd-enforce.gates
-covers:
-  - 'skills/sdd-enforce/scripts/**'
-  - 'skills/sdd-enforce/assets/repository/scripts/**'
-  - 'skills/sdd-enforce/assets/repository/_claude/hooks/**'
+code: skills/sdd-enforce
 critical:
   - V1
   - V2
@@ -40,12 +37,15 @@ the docs, the evidence and the agent files true, and accept each of their valid 
 ## Constraints
 
 - The CLI and the gates run on Node 22 or later, with no dependencies outside the Node standard library.
-- The templates hold no organization-specific names, links or secrets. An organization line comes from
-  `docsStandardLine` in the target configuration.
+- The templates hold no organization-specific names, links or secrets. The organization's map line and the
+  name of its docs standard come from `docsStandardLine` and `docsStandard` in the target configuration.
 - The generated layout follows a docs standard. It ships `AGENTS.md` and never `CLAUDE.md`, and kebab-case docs
   under `docs/`. It uses docs of record instead of module `SPEC.md` files, and keeps plans in the issue tracker.
 - The decision to replace module `SPEC.md` files is in
-  [ADR 0001](adr/0001-docs-of-record-replace-module-specs.md).
+  [ADR 0001](adr/0001-docs-of-record-replace-module-specs.md). The owner model, one `code:` folder per doc, is
+  in [ADR 0002](adr/0002-a-code-file-has-one-owner-the-doc-with-the-longest-code-folder.md). The ported
+  standard checks and the declared map rows are in
+  [ADR 0003](adr/0003-the-gates-port-the-standard-script-checks-and-accept-declared-map-rows.md).
 
 ## Interfaces
 
