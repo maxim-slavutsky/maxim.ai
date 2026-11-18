@@ -9,8 +9,8 @@ The rule [`.claude/rules/doc-of-record.md`](../.claude/rules/doc-of-record.md) l
 
 Write a doc of record when a module has an invariant that the code does not show, and a consumer breaks
 when the invariant breaks. A module inside an app usually has one. A package with a public runtime
-contract has one. A package that holds only types, presentational components or configuration needs only
-its `AGENTS.md`, until an invariant appears.
+contract has one. A package that holds only types, presentational components or configuration needs none,
+until an invariant appears.
 
 ## Where it lives
 
@@ -53,11 +53,16 @@ The headings come in this order. Every doc of record has the goal, and the other
 A repository that declares its own encoding for module docs in `docs/map.md` keeps its own headings. The
 frontmatter, the invariant ids and the evidence stay as this doc says.
 
-Two kinds of fact go in other docs, and the doc of record links them:
+Three kinds of fact have another home, and the doc of record links the first two:
 
 - A wire shape goes in an API contract. Examples are an endpoint, an event and a queue message. The contract is
-  `docs/<subject>-contract.md`, or `<workspace>/docs/<subject>-contract.md` when one workspace uses it.
-- A decision that is hard to reverse goes in an ADR under `docs/adr/`, with the options the team declined.
+  `docs/<subject>-contract.md`, or `<workspace>/docs/<subject>-contract.md` when one workspace uses it. The
+  header comment of each source file that serves or reads the wire names the contract path. An `AGENTS.md`
+  links a contract only when every session there needs it.
+- A decision goes in an ADR under `docs/adr/`, with the options the team declined, when all three hold: it is
+  hard to reverse, it would surprise a later reader, and the team weighed real alternatives.
+- A gotcha that one source file owns goes in the header comment of that file, written as a statement of what
+  the code is. One file owns a gotcha when an edit to that file alone can trip it and the fix is in that file.
 
 ### Interfaces
 
@@ -68,7 +73,8 @@ env: <NAME>: <constraint>
 ```
 
 A function signature or a type is not an interface line. The source declares it, and a copy goes stale.
-Write a rule about a function as an invariant.
+Write a rule about a function as an invariant. The gate fails on a line of this section that starts with
+`fn:` or `type:`.
 
 ### Invariants
 
@@ -104,8 +110,9 @@ Compare the doc, the test and the code when they disagree.
 
 1. **Read before you edit.** Before you edit a file, read the doc of record whose `code:` folder holds it.
    Also read each doc of a folder above it, up to the module root. A parent doc holds the rules that span
-   its folders. Then read the workspace `AGENTS.md` and the root `AGENTS.md`. If no doc holds the file, start
-   with the workspace `AGENTS.md`.
+   its folders. Then read the header comment of the file, and each `AGENTS.md` above it up to the root. A
+   workspace with no gotcha and no pointer of its own has no `AGENTS.md`. If no doc holds the file, start with
+   the nearest `AGENTS.md` above it.
 2. **Trust the doc.** When the doc answers the question, do not read the implementation, except to check
    one line. If the doc is wrong, fix the doc.
 3. **Update the doc in the same commit.** A change to behavior, an interface or an invariant updates the
@@ -116,7 +123,7 @@ Compare the doc, the test and the code when they disagree.
 5. **Check every module you touch.** A change across several modules reads each affected doc. Then it
    checks that their links and citations still hold.
 6. **Move the owner with the code.** The owner of a runtime file is the doc of record with the longest
-   `code:` folder that holds it, else the workspace `AGENTS.md`. Tests, type declarations and files under
+   `code:` folder that holds it, else the nearest `AGENTS.md` above it. Tests, type declarations and files under
    `docs/` are not runtime files. A commit that changes a runtime file also changes its owner. When it
    cannot, add the trailer `Doc-Impact: none - <reason>` and name each file and why its behavior cannot
    change.
@@ -124,7 +131,10 @@ Compare the doc, the test and the code when they disagree.
    an invariant critical to look thorough.
 8. **State the current code only.** Write no dates and no "was X until". Write no measurements that only
    justify a past change, no verification logs, no task lists and no open check boxes. Put open work and bugs in the
-   issue tracker. Git keeps the history.
+   issue tracker. Git keeps the history. A doc that no longer matches the code gets fixed or deleted: it gets no
+   banner that says it is out of date, and no dated copy such as `setup-old.md` or a file under `archive/`.
+   `check-docs` prints a warning for a history word or a date in a doc of record and for a dated copy name. A
+   warning is advice, and the gate stays green.
 
 The gates check the shape of these docs, not their meaning: a doc that states the wrong behavior passes
 them. What each gate checks is in the header comment of `scripts/check-docs.mjs` and

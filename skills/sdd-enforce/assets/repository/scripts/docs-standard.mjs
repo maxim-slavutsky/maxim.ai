@@ -1,7 +1,9 @@
 /**
  * The checks of the docs standard that a script can decide, for scripts/check-docs.mjs: where docs live, how they
- * are named, how large agent docs grow, the ADR status, research notes, open check boxes, contract links, and each
- * migration's detect check. A migration that needs a reader's judgment stays out; the docs audit asks it.
+ * are named, how large agent docs grow, the ADR status in both directions, research notes, open check boxes and
+ * signature lines in a doc of record, the source file that names each API contract, and each migration's detect
+ * check. A migration that needs a reader's judgment stays out; the docs audit asks it. standardWarnings() lists what
+ * a script can only suspect: history words and dates in a doc of record, and a name that reads as a dated copy.
  *
  * Test fixtures (any path under evals/, fixture/, fixtures/, __fixtures__/ or testdata/) are outside every check,
  * as in the audit. docs/map.md is outside the migration checks: it names the old homes on purpose.
@@ -62,7 +64,7 @@ export const MIGRATIONS = [
 /** The writing terms of the docs standard. A repo GLOSSARY.md holds domain terms and none of these. */
 export const WRITING_TERMS = [
   'Docs standard', 'Migration', 'Living doc', 'Doc of record', 'API contract', 'Spec', 'ADR', 'Research note', 'Rule',
-  'Workspace', 'Doc type', 'Audience', 'Covered module',
+  'Workspace', 'Doc type', 'Audience', 'Gotcha', 'Header comment', 'Look-up', 'Missed fact', 'Dated copy', 'Legacy code',
 ];
 
 /** A living doc states the code as it is. ADRs and research notes keep their date instead. */
@@ -119,6 +121,7 @@ export function standardProblems({ files, read, isIgnored = () => false }) {
   problems.push(...adrProblems(inScope, read));
   problems.push(...researchNoteProblems(inScope, read));
   problems.push(...openBoxProblems(inScope, read));
+  problems.push(...interfaceProblems(inScope, read));
   problems.push(...contractProblems(inScope, read));
   problems.push(...migrationProblems(inScope, read, isIgnored));
   return problems;
@@ -176,6 +179,34 @@ function adrProblems(files, read) {
       }
     }
   }
+  return [...out, ...supersededSilently(adrs, read)];
+}
+
+/**
+ * The other direction: an ADR whose text says it supersedes an older one, while the status of the older one does not
+ * name it. "supersedes ADR-0002" and "superseding ADR 2" claim it; "does not supersede" and a bare mention do not.
+ */
+function supersededSilently(adrs, read) {
+  const out = [];
+  const seen = new Set();
+  for (const path of adrs) {
+    const number = path.match(ADR_FILE)[1];
+    const text = read(path).replace(/^---\n[\s\S]*?\n---\n/, '');
+    for (const [, clause] of text.matchAll(/\bsupersed(?:es|ing)\b([^.\n]*)/gi)) {
+      for (const [, older] of clause.matchAll(/\bADR[- ]0*(\d+)\b/g)) {
+        const olderPath = adrs.find((item) => Number(item.match(ADR_FILE)[1]) === Number(older) && dirname(item) === dirname(path));
+        if (!olderPath || olderPath === path || seen.has(`${olderPath}|${number}`)) continue;
+        seen.add(`${olderPath}|${number}`);
+        const block = frontmatter(read(olderPath));
+        const status = block ? frontmatterScalar(block, 'status') : null;
+        // A missing or malformed status has its own line above.
+        if (!status || !ADR_STATUS.test(status)) continue;
+        if (![...status.matchAll(/ADR-(\d{4})/g)].some(([, named]) => named === number)) {
+          out.push(`${olderPath}: ADR-${number} says it supersedes this ADR, but the status does not name ADR-${number}. Set status: 'superseded by ADR-${number} (<what>, <date>)', or append " and ADR-${number} (<what>, <date>)" to a superseded status.`);
+        }
+      }
+    }
+  }
   return out;
 }
 
@@ -214,26 +245,91 @@ function openBoxProblems(files, read) {
 }
 
 /**
- * An API contract is linked from the AGENTS.md of the workspace that holds it, directly or through the docs/README.md
- * index that the AGENTS.md links. A contract in the root docs/ is shared, so at least one AGENTS.md links it; which
- * ones read the wire is a judgment the audit makes.
+ * A line of the Interfaces section that starts with "fn:" or "type:" copies a signature or a type. The source declares
+ * both, so the copy is a look-up that goes stale. "§I" is the heading of a repository with its own encoding.
+ */
+function interfaceProblems(files, read) {
+  const out = [];
+  for (const path of files.filter((item) => item.endsWith('.md') && isLivingDoc(item) && docOfRecord(item, read(item)))) {
+    let fenced = false;
+    let interfaces = false;
+    read(path).split('\n').forEach((line, index) => {
+      if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced;
+      else if (!fenced && /^##\s/.test(line)) interfaces = /^##\s+(?:Interfaces|§I)\b/.test(line);
+      else if (interfaces && /^\s*(?:fn|type):\s/.test(line)) {
+        const kind = line.trim().split(':')[0];
+        out.push(`${path}:${index + 1}: the "${kind}:" line restates what the source declares, and a copy goes stale. Delete the line, and write a rule about the function or type as an invariant.`);
+      }
+    });
+  }
+  return out;
+}
+
+// A file with no comment syntax, or no text, has no header comment that could name a contract.
+const NOT_SOURCE = /(?:\.(?:md|mdc|json|lock|png|jpe?g|gif|svg|ico|pdf|woff2?|ttf|eot|zip|gz|tgz|jar|map|snap)|(?:^|\/)pnpm-lock\.yaml)$/i;
+
+/**
+ * The header comment of each source file that serves or reads a wire links its API contract. A script cannot tell
+ * which files those are, so the check is: at least one source file names the contract file. A contract in
+ * <workspace>/docs/ belongs to that workspace, so a file of that workspace names it. A contract in the root docs/ is
+ * shared, so any source file may.
  */
 function contractProblems(files, read) {
+  const contracts = files
+    .filter((item) => /(?:^|\/)docs\/[^/]+-contract\.md$/.test(item))
+    .map((path) => {
+      const workspace = dirname(dirname(path));
+      return { path, name: basename(path), workspace, prefix: workspace === '.' ? '' : `${workspace}/`, named: false };
+    });
+  if (!contracts.length) return [];
+  for (const source of files) {
+    if (NOT_SOURCE.test(source)) continue;
+    const open = contracts.filter((contract) => !contract.named && source.startsWith(contract.prefix));
+    if (!open.length) continue;
+    const body = read(source);
+    for (const contract of open) contract.named = body.includes(contract.name);
+  }
+  const fix = 'Name its path in the header comment of each source file that serves or reads the wire.';
+  return contracts
+    .filter((contract) => !contract.named)
+    .map((contract) =>
+      contract.prefix
+        ? `${contract.path}: no source file under ${contract.workspace} names this API contract. ${fix} A wire that another workspace also serves or reads has its contract in the root docs/.`
+        : `${contract.path}: no source file names this API contract. ${fix}`,
+    );
+}
+
+const HISTORY_WORDS = /\b(used to|no longer|any ?more|was fixed|known gap|revisit|not chosen|today|planned)\b/i;
+const ISO_DATE = /\b(?:19|20)\d\d-\d\d-\d\d\b/;
+const DATED_COPY = /(?:^|\/)archive\/|(?:[-_.]old|[-_.](?:19|20)\d\d|\.v\d+)\.md$/i;
+
+/**
+ * What a script can suspect and only a reader can decide, one line each. The gate prints these and stays green:
+ * a history word or a date in a doc of record (fenced examples never count), and a living doc whose name reads as a
+ * dated copy (setup-old.md, setup-2025.md, setup.v1.md, a file under archive/).
+ */
+export function standardWarnings({ files, read }) {
   const out = [];
-  const agentsFiles = files.filter((path) => basename(path) === 'AGENTS.md');
-  for (const path of files.filter((item) => /(?:^|\/)docs\/[^/]+-contract\.md$/.test(item))) {
-    const workspace = dirname(dirname(path));
-    if (workspace !== '.') {
-      const agents = `${workspace}/AGENTS.md`;
-      const index = `${dirname(path)}/README.md`;
-      const agentsLinks = files.includes(agents) ? linksIn(agents, read) : new Set();
-      const viaIndex = agentsLinks.has(index) && files.includes(index) && linksIn(index, read).has(path);
-      if (!agentsLinks.has(path) && !viaIndex) {
-        out.push(`${agents} does not link ${path}. Each workspace that serves or reads a wire links its API contract from its AGENTS.md.`);
-      }
-    } else if (!agentsFiles.some((agents) => linksIn(agents, read).has(path))) {
-      out.push(`${path}: no AGENTS.md links this API contract. Link it from the AGENTS.md of each workspace that serves or reads the wire.`);
+  for (const path of files.filter((item) => item.endsWith('.md') && !FIXTURE_DIR.test(item) && isLivingDoc(item))) {
+    if (DATED_COPY.test(path)) {
+      out.push(`${path}: the name reads as a dated copy of a living doc. Fold what the living doc lacks into it and delete this file. Git keeps the history.`);
     }
+    if (!docOfRecord(path, read(path))) continue;
+    let fenced = false;
+    read(path).split('\n').forEach((line, index) => {
+      if (/^\s*(?:```|~~~)/.test(line)) {
+        fenced = !fenced;
+        return;
+      }
+      if (fenced) return;
+      const word = line.match(HISTORY_WORDS)?.[1];
+      const date = line.match(ISO_DATE)?.[0];
+      if (word) {
+        out.push(`${path}:${index + 1}: "${word}" reads as history or a plan. A doc of record states the current code: state the rule as it is now, and put open work in the issue tracker.`);
+      } else if (date) {
+        out.push(`${path}:${index + 1}: the date ${date} reads as history. A doc of record states the current code, and Git keeps the history: delete the date.`);
+      }
+    });
   }
   return out;
 }

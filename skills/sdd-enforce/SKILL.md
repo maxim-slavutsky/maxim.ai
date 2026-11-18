@@ -67,6 +67,9 @@ Arguments: `$ARGUMENTS`
      bugs go to the issue tracker), and a row in the `README.md` index of its `docs/` folder; `@spec` becomes
      `@invariant`; `CLAUDE.md` lines move into `AGENTS.md`; docs under `docs/` get kebab-case names. Never
      invent behavior;
+   - move what only a reader can find, per the second table of the migration policy: a contract link and a
+     one-file gotcha go from `AGENTS.md` into the header comment of the source file, an `AGENTS.md` left empty
+     goes, and a stale living doc or a dated copy is fixed or deleted;
    - wire both gates in the Git hook home (`.husky/` for JS, `.pre-commit-config.yaml` for pre-commit):
      `node scripts/check-docs.mjs && node scripts/check-sdd.mjs` in pre-commit, `--staged --commit-msg` in
      commit-msg, and in CI both static commands and `--changed` (static alone never inspects a commit). Call `node`

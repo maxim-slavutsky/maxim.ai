@@ -112,9 +112,13 @@ function checkDocs() {
   for (const path of markdown) {
     const key = rel(path);
     if (key === 'AGENTS.md') continue;
-    const kind = basename(path) === 'AGENTS.md' ? 'AGENTS.md' : docOfRecord(key, readFileSync(path, 'utf8')) ? 'doc of record' : null;
+    const kind =
+      basename(path) === 'AGENTS.md' ? 'AGENTS.md'
+      : docOfRecord(key, readFileSync(path, 'utf8')) ? 'doc of record'
+      : /(?:^|\/)docs\/[^/]+-contract\.md$/.test(key) && !FIXTURE_DIR.test(key) ? 'API contract'
+      : null;
     if (kind && !inbound.has(key)) {
-      fail(`unreachable ${kind}: ${key}. No other Markdown file links to it, so people and agents cannot find it. Link an AGENTS.md from its parent AGENTS.md or README.md, and list a doc of record in the README.md of its docs/ folder.`);
+      fail(`unreachable ${kind}: ${key}. No other Markdown file links to it, so people and agents cannot find it. Link an AGENTS.md from its parent AGENTS.md or README.md, and list a doc of record or an API contract in the README.md of its docs/ folder.`);
     }
   }
 }

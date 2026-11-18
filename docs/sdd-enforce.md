@@ -25,6 +25,10 @@ critical:
   - V21
   - V22
   - V23
+  - V24
+  - V25
+  - V26
+  - V27
 ---
 
 # sdd-enforce installer and gates
@@ -108,9 +112,9 @@ V10: The reason of `Doc-Impact: none - <reason>`, `Spec-Impact: none - <reason>`
 folds like a Git trailer. Each following line that starts with whitespace continues it and joins with a space. A
 line without leading whitespace ends it.
 
-V11: `scripts/check-docs.mjs` fails on a workspace under `runtimeRoots` without `AGENTS.md`, and on a module folder
-under `moduleRoots` that no doc of record covers: a doc covers a module when its `code:` is the module folder or a
-folder inside it. It fails on a doc of record that the `README.md` of its `docs/` folder does not link, and on
+V11: `scripts/check-docs.mjs` fails on a module folder under `moduleRoots` that no doc of record covers: a doc
+covers a module when its `code:` is the module folder or a folder inside it. It asks for no `AGENTS.md` per
+workspace, because a workspace with no gotcha and no pointer has none. It fails on a doc of record that the `README.md` of its `docs/` folder does not link, and on
 that index when the nearest `AGENTS.md` above the `docs/` folder does not link it. A link with an anchor or an
 encoded character counts. With the `sdd` profile, it fails on a root `AGENTS.md` that does not link
 `docs/doc-of-record.md`. A non-empty `docsStandardLine` must be a line of the root `AGENTS.md`. `verify` runs
@@ -167,9 +171,10 @@ names an ADR that does not exist, and on a superseding ADR that does not name th
 only: an `accepted` note names no superseding ADR): as `ADR-0005`,
 `ADR 5`, a link to its file, or its decision id `D5` or `§D5`. It fails on a research note without `date:`,
 `question:`, `## Findings` or `## Not covered`, and on an open check box outside a fenced block in a doc of
-record. A checklist in another doc is a procedure and passes. It fails on an API contract that no `AGENTS.md`
-links: the workspace's own `AGENTS.md`, directly or through the `docs/README.md` index it links, for a contract in
-`<workspace>/docs/`, and any `AGENTS.md` for one in the root `docs/`.
+record. A checklist in another doc is a procedure and passes. It fails on an API contract (`docs/*-contract.md`)
+whose file name no source file holds: a file of the same workspace for a contract in `<workspace>/docs/`, and any
+source file for one in the root `docs/`. Markdown, JSON, lock and binary files are no source files, so a link from
+an `AGENTS.md` does not count.
 
 V22: `scripts/check-sdd.mjs` fails on a `.claude/rules/<n>.md` without `paths:`, and, with Claude Code and Codex or
 Cursor enabled, on a rule without its `.agents/skills/<n>` twin. `--changed` lists a moved file under its new path
@@ -179,3 +184,20 @@ V23: Apply writes `docsStandard` to `.agent-sdd/config.json`: the user's `name`,
 standard version the gates port. `plan` names each empty value the user must give: `docsStandardLine` and
 `docsStandard.name`. `audit --standard <dir>` reads the version in `<dir>/.claude-plugin/plugin.json` and warns
 when it is newer than the ported version, comparing the numbers of each part.
+
+V24: `scripts/check-docs.mjs` fails on an ADR with a valid status that a later ADR in the same folder says it
+supersedes, when that status does not name the later ADR. The claim is the word "supersedes" or "superseding"
+followed in the same sentence by `ADR-NNNN` or `ADR NNNN`. "Does not supersede" and a mention without the verb
+claim nothing.
+
+V25: `scripts/check-docs.mjs` fails on a line that starts with `fn:` or `type:` in the `## Interfaces` or `## §I`
+section of a doc of record. The same line under another heading passes.
+
+V26: `scripts/check-sdd.mjs` fails on an API contract (`docs/*-contract.md`, outside test fixtures) that no other
+Markdown file links, as it does for an `AGENTS.md` and a doc of record.
+
+V27: `scripts/check-docs.mjs` prints warnings and keeps its exit code. It warns once per line of a doc of record,
+outside fenced blocks, that holds a history word (`used to`, `no longer`, `any more`, `was fixed`, `known gap`,
+`revisit`, `not chosen`, `today`, `planned`) or an ISO date. It warns on a living doc under `archive/` or with a
+name that ends in `-old`, a year or `.v<n>`. ADRs and research notes are outside the warnings. It prints at most
+20 lines and the count of the rest.

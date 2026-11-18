@@ -20,7 +20,7 @@ import { matchesGlob, skipRules } from '../assets/repository/scripts/sdd-lib.mjs
 
 const VERSION = '1.0.0';
 // The version of the docs standard whose script checks scripts/docs-standard.mjs ports.
-const STANDARD_VERSION = '0.9.0';
+const STANDARD_VERSION = '0.10.0';
 const SKILL_NAME = 'sdd-enforce';
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSET_ROOT = join(SKILL_ROOT, 'assets', 'repository');

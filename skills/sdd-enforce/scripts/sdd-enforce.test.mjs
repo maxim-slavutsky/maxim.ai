@@ -962,12 +962,13 @@ test('check-docs applies the docs standard: no CLAUDE.md, kebab-case docs, sizes
 test('check-docs applies the rubric script criteria: root README, root AGENTS.md, glossary terms [@invariant sdd-enforce.gates:V16]', () => {
   const root = installed();
   writeFileSync(join(root, 'README.md'), '# Fixture\n\n', 'utf8');
-  writeFileSync(join(root, 'GLOSSARY.md'), '# Glossary\n\n**Bet slip**:\nThe bets a user collects.\n\n**Spec**:\nA plan.\n', 'utf8');
+  writeFileSync(join(root, 'GLOSSARY.md'), '# Glossary\n\n**Bet slip**:\nThe bets a user collects.\n\n**Spec**:\nA plan.\n\n**Gotcha**:\nA trap.\n\n**Covered module**:\nA module with a doc.\n', 'utf8');
   let checked = docsGate(root);
   assert.notEqual(checked.status, 0);
   assert.match(checked.stderr, /README\.md holds only a heading/);
   assert.match(checked.stderr, /GLOSSARY\.md: the term "Spec" collides with the writing term "Spec"/);
-  assert.doesNotMatch(checked.stderr, /Bet slip/);
+  assert.match(checked.stderr, /GLOSSARY\.md: the term "Gotcha" collides with the writing term "Gotcha"/);
+  assert.doesNotMatch(checked.stderr, /Bet slip|Covered module/);
 
   rmSync(join(root, 'AGENTS.md'));
   checked = docsGate(root);
@@ -1008,7 +1009,7 @@ test('check-docs fails on each migration detect hit and names the migration and 
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('check-docs fails on an ADR status form, a one-sided supersession, a bare research note, an open box and an unlinked contract [@invariant sdd-enforce.gates:V21]', () => {
+test('check-docs fails on an ADR status form, a one-sided supersession, a bare research note, an open box and a contract that no source file names [@invariant sdd-enforce.gates:V21]', () => {
   const root = installed();
   const write = (path, body) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -1035,25 +1036,110 @@ test('check-docs fails on an ADR status form, a one-sided supersession, a bare r
   write('docs/agent-parity.md', `${readFileSync(join(root, 'docs', 'agent-parity.md'), 'utf8')}\nBefore you open the PR, check:\n\n- [ ] the adapter links the rule\n`);
   writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: '## Goal\n\nThe fixture exists.\n\n```text\n- [ ] an example inside a fence\n```\n\n- [ ] later\n' });
   write('apps/api/package.json', '{ "name": "api" }\n');
-  write('apps/api/AGENTS.md', '# api\n\n- [Docs and contracts](docs/README.md)\n');
-  write('apps/api/docs/README.md', '# api docs\n\n- [payments contract](payments-contract.md)\n');
   write('apps/api/docs/payments-contract.md', '# Payments contract\n');
   write('apps/api/docs/orders-contract.md', '# Orders contract\n');
+  write('docs/events-contract.md', '# Events contract\n');
+  // The header comment of a source file in the workspace names the contract.
+  write('apps/api/src/payments.js', '/**\n * Serves the payments wire: ../docs/payments-contract.md\n */\nexport const pay = 1;\n');
+  // A link from AGENTS.md or from a source file of another workspace is no link from the code on the wire.
+  write('apps/api/AGENTS.md', '# api\n\n- [orders contract](docs/orders-contract.md)\n');
+  write('apps/web/src/orders.js', '// Reads apps/api/docs/orders-contract.md\nexport const orders = 1;\n');
   checked = docsGate(root);
   assert.doesNotMatch(checked.stderr, /docs\/adr\//);
   assert.match(checked.stderr, /docs\/research\/q\.md needs frontmatter "date:"/);
   assert.match(checked.stderr, /docs\/core\.md:\d+: an open check box/);
   assert.equal((checked.stderr.match(/docs\/core\.md:\d+: an open check box/g) ?? []).length, 1, 'the fenced box is an example');
   assert.doesNotMatch(checked.stderr, /agent-parity\.md:\d+: an open check box/);
-  assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/docs\/orders-contract\.md/);
-  // The workspace index that AGENTS.md links counts as the link to a contract.
+  assert.match(checked.stderr, /apps\/api\/docs\/orders-contract\.md: no source file under apps\/api names this API contract/);
+  assert.match(checked.stderr, /docs\/events-contract\.md: no source file names this API contract/);
   assert.doesNotMatch(checked.stderr, /payments-contract/);
 
   write('docs/research/q.md', '---\ndate: 2026-01-01\nquestion: Why is it slow?\n---\n\n# Q\n\nThe cache is cold.\n\n## Findings\n\n- One miss per call.\n\n## Not covered\n\n- Load.\n');
   writeDoc(root, 'docs/core.md', { id: 'fixture.core' });
-  write('apps/api/docs/README.md', '# api docs\n\n- [payments contract](payments-contract.md)\n- [orders contract](orders-contract.md)\n');
+  write('apps/api/src/orders.js', '// Serves the orders wire: ../docs/orders-contract.md\nexport const orders = 1;\n');
+  // A contract in the root docs/ is shared: a source file of any workspace names it.
+  write('apps/web/src/events.js', '// Reads the events wire: docs/events-contract.md\nexport const events = 1;\n');
   checked = docsGate(root);
   assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('check-docs fails on an ADR that a later ADR says it supersedes while its status stays silent [@invariant sdd-enforce.gates:V24]', () => {
+  const root = installed();
+  const write = (path, body) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body, 'utf8');
+  };
+  const adr = (status, body = '') => `---\nstatus: '${status}'\n---\n\n# A decision\n\nDecided 2026-01-01 (T-1). ${body}\n`;
+  write('docs/adr/0001-x.md', adr('accepted'));
+  write('docs/adr/0002-y.md', adr('accepted', 'It supersedes ADR-0001 and [ADR 0003](0003-z.md).'));
+  write('docs/adr/0003-z.md', adr('superseded by ADR-0002 (z, 2026-02-01)'));
+  // A denial and a mention without the verb claim nothing.
+  write('docs/adr/0004-w.md', adr('accepted', 'It does not supersede ADR-0003. It builds on ADR-0001.'));
+  let checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /docs\/adr\/0001-x\.md: ADR-0002 says it supersedes this ADR, but the status does not name ADR-0002/);
+  assert.equal((checked.stderr.match(/says it supersedes this ADR/g) ?? []).length, 1, 'ADR 0003 names ADR-0002, and ADR 0004 claims nothing');
+
+  write('docs/adr/0001-x.md', adr('superseded by ADR-0002 (x, 2026-02-01)'));
+  checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('check-docs fails on a signature line in the Interfaces of a doc of record [@invariant sdd-enforce.gates:V25]', () => {
+  const root = installed();
+  const lines = [
+    '## Goal', '', 'The fixture exists.', '',
+    '## Interfaces', '', '```text', 'api: GET /health -> 200 ok', 'fn: load(path: string): Config', 'type: Config = { port: number }', '```', '',
+    '## Invariants', '', 'V1: The fixture holds.', '', '```text', 'fn: a line outside Interfaces', '```', '',
+  ];
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: lines.join('\n') });
+  let checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /docs\/core\.md:\d+: the "fn:" line restates what the source declares/);
+  assert.match(checked.stderr, /docs\/core\.md:\d+: the "type:" line restates what the source declares/);
+  assert.equal((checked.stderr.match(/restates what the source declares/g) ?? []).length, 2, 'only the Interfaces section holds interface lines');
+
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: lines.filter((line) => !/^(?:fn|type): (?:load|Config)/.test(line)).join('\n') });
+  checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('check-sdd fails on an API contract that no Markdown file links [@invariant sdd-enforce.gates:V26]', () => {
+  const root = installed();
+  writeFileSync(join(root, 'docs', 'events-contract.md'), '# Events contract\n', 'utf8');
+  let checked = gate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /unreachable API contract: docs\/events-contract\.md/);
+
+  addLink(root, 'README.md', 'docs/events-contract.md', 'events contract', '# Fixture');
+  checked = gate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('check-docs warns on history words and dates in a doc of record and on a dated copy, and stays green [@invariant sdd-enforce.gates:V27]', () => {
+  const root = installed();
+  const write = (path, body) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body, 'utf8');
+  };
+  const lines = [
+    '## Goal', '', 'The fixture exists.', '',
+    '## Invariants', '', 'V1: The cache no longer stores tokens.', 'V2: Since 2026-01-05 the limit is 10.', '',
+    '```text', 'POST /x {"date":"2026-01-05","note":"planned"}', '```', '',
+  ];
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: lines.join('\n') });
+  write('docs/setup-old.md', '# Old setup\n');
+  write('docs/archive/notes.md', '# Notes\n');
+  // An ADR keeps its date, so its name and text are outside the warnings.
+  write('docs/adr/0001-budget-2025.md', "---\nstatus: 'accepted'\n---\n\n# Budget\n\nDecided 2025-01-01 (T-1). It is no longer open.\n");
+  const checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+  assert.match(checked.stdout, /check-docs: 4 warning\(s\)/);
+  assert.match(checked.stdout, /docs\/core\.md:\d+: "no longer" reads as history or a plan/);
+  assert.match(checked.stdout, /docs\/core\.md:\d+: the date 2026-01-05 reads as history/);
+  assert.match(checked.stdout, /docs\/setup-old\.md: the name reads as a dated copy of a living doc/);
+  assert.match(checked.stdout, /docs\/archive\/notes\.md: the name reads as a dated copy of a living doc/);
+  assert.match(checked.stdout, /check-docs: ok/);
 });
 
 test('a rule needs paths: and an .agents twin when Codex or Cursor is on [@invariant sdd-enforce.gates:V22]', () => {
@@ -1106,22 +1192,24 @@ test('--changed follows a moved folder like --staged does [@invariant sdd-enforc
 test('audit warns when the installed standard is newer than the ported checks [@invariant sdd-enforce.gates:V23]', () => {
   const root = installed();
   const config = JSON.parse(readFileSync(join(root, '.agent-sdd', 'config.json'), 'utf8'));
-  assert.deepEqual(config.docsStandard, { name: '', version: '0.9.0' });
+  assert.deepEqual(config.docsStandard, { name: '', version: '0.10.0' });
 
   const standard = mkdtempSync(join(tmpdir(), 'sdd-enforce-standard-'));
   fixtures.push(standard);
   mkdirSync(join(standard, '.claude-plugin'), { recursive: true });
   const pluginJson = join(standard, '.claude-plugin', 'plugin.json');
-  writeFileSync(pluginJson, '{ "name": "docs-standard", "version": "0.10.0" }\n', 'utf8');
+  writeFileSync(pluginJson, '{ "name": "docs-standard", "version": "0.11.0" }\n', 'utf8');
   let audited = run(['audit', root, '--standard', standard]);
   assert.equal(audited.status, 0, audited.stderr);
-  assert.match(audited.stdout, /installed standard 0\.10\.0 is newer than the 0\.9\.0 checks/);
+  assert.match(audited.stdout, /installed standard 0\.11\.0 is newer than the 0\.10\.0 checks/);
   assert.equal(JSON.parse(run(['audit', root, '--standard', standard, '--json']).stdout).standard.newer, true);
 
-  // Versions compare by number: 0.9.0 is not newer than 0.9.0, and 0.10.0 is newer than 0.9.0.
-  writeFileSync(pluginJson, '{ "name": "docs-standard", "version": "0.9.0" }\n', 'utf8');
-  audited = run(['audit', root, '--standard', standard]);
-  assert.doesNotMatch(audited.stdout, /is newer than/);
+  // Versions compare by number: 0.10.0 is not newer than 0.10.0, and 0.9.0 is older than 0.10.0.
+  for (const version of ['0.10.0', '0.9.0']) {
+    writeFileSync(pluginJson, `{ "name": "docs-standard", "version": "${version}" }\n`, 'utf8');
+    audited = run(['audit', root, '--standard', standard]);
+    assert.doesNotMatch(audited.stdout, /is newer than/, version);
+  }
 });
 
 test('plan lists the values apply needs from the user [@invariant sdd-enforce.gates:V23]', () => {
@@ -1540,7 +1628,7 @@ test('docs/README.md indexes every doc of record, and the nearest AGENTS.md link
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('check-docs demands AGENTS.md per workspace, a covering doc per module, its link, and the root pointer [@invariant sdd-enforce.gates:V11]', () => {
+test('check-docs demands a covering doc per module, its index row, the index link and the root pointer, and no AGENTS.md per workspace [@invariant sdd-enforce.gates:V11]', () => {
   const root = fixture();
   mkdirSync(join(root, 'apps', 'api', 'src', 'modules', 'auth'), { recursive: true });
   writeFileSync(join(root, 'apps', 'api', 'package.json'), '{ "name": "api" }\n', 'utf8');
@@ -1554,10 +1642,10 @@ test('check-docs demands AGENTS.md per workspace, a covering doc per module, its
 
   let checked = docsGate(root);
   assert.notEqual(checked.status, 0);
-  assert.match(checked.stderr, /missing AGENTS\.md: apps\/api/);
+  // A workspace with no gotcha and no pointer to hold has no AGENTS.md.
+  assert.doesNotMatch(checked.stderr, /missing AGENTS\.md/);
   assert.match(checked.stderr, /module not covered: apps\/api\/src\/modules\/auth/);
 
-  writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n', 'utf8');
   mkdirSync(join(root, 'apps', 'api', 'docs'), { recursive: true });
   writeFileSync(join(root, 'apps', 'api', 'docs', 'auth.md'), "---\nid: api.auth\ncode: apps/api/src/modules/auth\n---\n\n# Auth\n\n## Goal\n\nLog users in.\n", 'utf8');
   checked = docsGate(root);
@@ -1567,8 +1655,10 @@ test('check-docs demands AGENTS.md per workspace, a covering doc per module, its
   writeFileSync(join(root, 'apps', 'api', 'docs', 'README.md'), '# api docs\n\n- [auth](auth.md): the auth module\n', 'utf8');
   checked = docsGate(root);
   assert.notEqual(checked.status, 0);
-  assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/docs\/README\.md/);
+  // Without a workspace AGENTS.md the root one is the nearest, so the gate asks it for the pointer.
+  assert.match(checked.stderr, /x AGENTS\.md does not link apps\/api\/docs\/README\.md/);
 
+  // The index is a pointer to hold, so the workspace gets an AGENTS.md.
   writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n\n- [docs of record](docs/README.md): one per module\n', 'utf8');
   checked = docsGate(root);
   assert.equal(checked.status, 0, checked.stderr);

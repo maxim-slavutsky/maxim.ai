@@ -37,12 +37,23 @@ on each one with no debt list, so the install change moves all of them.
 
 | Item | Move to |
 |---|---|
-| `**/SPEC.md` | `<workspace>/docs/<module>.md`, or root `docs/<module>.md` when its code is in no workspace. Keep `id` and every `V<n>` number (tests cite them). Add one `code:` folder (repo-relative, the folder the old `SPEC.md` sat in). Headings Goal, Constraints, Interfaces, Invariants, plain prose (no `§` headings, no compressed encoding). Drop Tasks, Bugs, Files tables: open work and bugs to the issue tracker. Wire shapes to an API contract `docs/<subject>-contract.md`; hard-to-reverse decisions to an ADR under `docs/adr/`. List the doc in the `README.md` index of its `docs/` folder, and link the index from the nearest `AGENTS.md` |
+| `**/SPEC.md` | `<workspace>/docs/<module>.md`, or root `docs/<module>.md` when its code is in no workspace. Keep `id` and every `V<n>` number (tests cite them). Add one `code:` folder (repo-relative, the folder the old `SPEC.md` sat in). Headings Goal, Constraints, Interfaces, Invariants, plain prose (no `§` headings, no compressed encoding). Drop Tasks, Bugs, Files tables: open work and bugs to the issue tracker. Wire shapes to an API contract `docs/<subject>-contract.md`, named in the header comment of each source file on the wire; a decision that is hard to reverse, surprising and had real alternatives to an ADR under `docs/adr/`. List the doc in the `README.md` index of its `docs/` folder, and link the index from the nearest `AGENTS.md` |
 | `@spec <id>:V<n>` | `@invariant <id>:V<n>` |
 | `CLAUDE.md` | Lines `AGENTS.md` lacks into the `AGENTS.md` beside it; delete the file. An `@AGENTS.md` line moves nowhere |
 | Doc under `docs/` with a non-kebab name | `git mv` to kebab-case (the gate message prints the command); update every link |
 | `.gitignore` `changes-log.md` block | Nothing; apply removes it. Delete a leftover local `changes-log.md` |
 | `Spec-Impact:` in existing commits, `spec-impact` in waivers | Leave; accepted forever. New commits use `Doc-Impact:`, new waivers `doc-impact` |
+
+`audit` cannot list the next items, because only a reader can tell them. Look for them in the same change:
+
+| Item | Move to |
+|---|---|
+| An `AGENTS.md` line that links an API contract | The header comment of each source file that serves or reads the wire. Delete the line unless every session in that workspace needs it. `check-docs` fails on a contract that no source file names |
+| An `AGENTS.md` gotcha that one source file owns | The header comment of that file, as a statement of what the code is. Delete the line |
+| A workspace `AGENTS.md` left with no gotcha and no pointer | Delete it, and repoint every link to it. The gates ask for no `AGENTS.md` per workspace |
+| A living doc with an out-of-date banner, or a dated copy (`setup-old.md`, `setup-2025.md`, a file under `archive/`) | Code still there: rewrite the doc and delete the banner. Code gone: delete the doc and repoint its links. Dated copy: fold what the living doc lacks into it, then delete the copy. `check-docs` warns on a dated copy name |
+| A `fn:` or `type:` line in the Interfaces section of a doc of record | Delete it; write a rule about the function as an invariant. `check-docs` fails on the line |
+| An ADR that a later ADR supersedes, with a status that does not say so | `status: 'superseded by ADR-NNNN (<what>, <date>)'`, several joined with " and ". `check-docs` fails in both directions |
 
 Shape and rules of a doc of record: `docs/doc-of-record.md` in the target repository.
 

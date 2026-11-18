@@ -3,11 +3,15 @@
  * Generated documentation gate: the docs a reader expects exist, are linked, and sit where the docs standard
  * puts them.
  *
- *   - every workspace under a runtime root (a folder with its own package manifest) carries an AGENTS.md;
  *   - every module folder under a configured module root is covered by a doc of record;
  *   - the README.md of each docs/ folder lists its docs of record, and the nearest AGENTS.md links that index;
  *   - the root AGENTS.md links docs/doc-of-record.md, and carries "docsStandardLine" when the config sets one;
  *   - the checks of the docs standard that a script can decide, in scripts/docs-standard.mjs.
+ *
+ * A workspace needs no AGENTS.md of its own: one with no gotcha and no pointer to hold has none.
+ *
+ * Warnings are advice and never fail the gate: a history word or a date in a doc of record, and a doc whose name
+ * reads as a dated copy. A script can suspect these, and only a reader can decide them.
  *
  * Nothing here inspects meaning. scripts/check-sdd.mjs owns link resolution, doc-of-record frontmatter, evidence,
  * and agent parity. Both run in pre-commit and CI.
@@ -21,13 +25,13 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { standardProblems } from './docs-standard.mjs';
+import { standardProblems, standardWarnings } from './docs-standard.mjs';
 import { docsOfRecord, normalize, skipRules, walkFiles } from './sdd-lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_PATH = join(ROOT, '.agent-sdd', 'config.json');
 const DOC_RULES = 'docs/doc-of-record.md';
-const WORKSPACE_MANIFESTS = ['package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle', 'Chart.yaml'];
+const MAX_WARNINGS = 20;
 const problems = [];
 const fail = (message) => problems.push(message);
 const rel = (path) => relative(ROOT, path).replaceAll('\\', '/');
@@ -72,10 +76,6 @@ function expand(pattern) {
   return current;
 }
 
-function isWorkspace(dir) {
-  return WORKSPACE_MANIFESTS.some((name) => existsSync(join(dir, name)));
-}
-
 /** Nearest AGENTS.md at or above `dir` (repo-relative), the root one included. */
 function nearestAgents(dir) {
   let cursor = dir;
@@ -108,19 +108,7 @@ function indexPath(doc) {
   return `${dirname(doc.path)}/README.md`;
 }
 
-// 1. Every workspace under a runtime root carries an AGENTS.md.
-function checkWorkspaces() {
-  for (const root of config?.runtimeRoots ?? []) {
-    for (const dir of directories(join(ROOT, String(root)))) {
-      if (!isWorkspace(dir)) continue;
-      if (!existsSync(join(dir, 'AGENTS.md'))) {
-        fail(`missing AGENTS.md: ${rel(dir)}. Every app or package needs an AGENTS.md with its gotchas and links to its docs of record (${DOC_RULES}).`);
-      }
-    }
-  }
-}
-
-// 2 + 3. Every module folder is covered by a doc of record, its docs/README.md lists it, and the nearest AGENTS.md links that index.
+// 1 + 2. Every module folder is covered by a doc of record, its docs/README.md lists it, and the nearest AGENTS.md links that index.
 function checkModules(docs) {
   for (const pattern of config?.moduleRoots ?? []) {
     for (const moduleRoot of expand(pattern)) {
@@ -157,7 +145,7 @@ function checkModules(docs) {
   }
 }
 
-// 4. The root AGENTS.md points at the doc-of-record rules, and carries the docs standard line when configured.
+// 3. The root AGENTS.md points at the doc-of-record rules, and carries the docs standard line when configured.
 function checkRootAgents() {
   const sdd = (config?.profiles ?? []).includes('sdd');
   const standard = String(config?.docsStandardLine ?? '').trim();
@@ -171,19 +159,28 @@ function checkRootAgents() {
   }
 }
 
-// 5. The checks of the docs standard that a script can decide (scripts/docs-standard.mjs).
+// 4. The checks of the docs standard that a script can decide (scripts/docs-standard.mjs).
 function checkStandard() {
   // Git decides what is ignored; outside a Git checkout nothing is.
   const isIgnored = (path) => spawnSync('git', ['check-ignore', '-q', path], { cwd: ROOT }).status === 0;
   for (const problem of standardProblems({ files: allFiles, read, isIgnored })) fail(problem);
 }
 
+// Advice: what a script can suspect and only a reader can decide. It never changes the exit code.
+function printWarnings() {
+  const warnings = standardWarnings({ files: allFiles, read });
+  if (!warnings.length) return;
+  console.log(`check-docs: ${warnings.length} warning(s). They are advice and never fail the gate:`);
+  for (const warning of warnings.slice(0, MAX_WARNINGS)) console.log(`  ! ${warning}`);
+  if (warnings.length > MAX_WARNINGS) console.log(`  ! and ${warnings.length - MAX_WARNINGS} more of the same kinds.`);
+}
+
 function main() {
   const docs = docsOfRecord(ROOT, allFiles);
-  checkWorkspaces();
   checkModules(docs);
   checkRootAgents();
   checkStandard();
+  printWarnings();
   if (problems.length) {
     console.error(`check-docs found ${problems.length} problem(s). Each line says what is wrong and how to fix it:`);
     for (const problem of problems) console.error(`  x ${problem}`);

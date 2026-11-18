@@ -191,12 +191,14 @@ the diff, wire the gates (see [Gate reference](#gate-reference)), then commit it
   Constraints, Interfaces, and Invariants, in plain prose. Only Goal is required. The full shape is in
   `docs/doc-of-record.md`.
 - **Open work goes to the issue tracker.** A doc of record has no task, bug, or file tables. A spec lives in
-  its ticket. A wire shape that two sides depend on goes in an API contract (`docs/<subject>-contract.md`). A
-  decision that is hard to reverse goes in an ADR under `docs/adr/`.
+  its ticket. A wire shape that two sides depend on goes in an API contract (`docs/<subject>-contract.md`), and
+  the header comment of each source file on the wire names it. A decision that is hard to reverse, surprising
+  and had real alternatives goes in an ADR under `docs/adr/`. A gotcha that one source file owns goes in the
+  header comment of that file.
 - **Critical invariants have tests.** An invariant listed under `critical:` needs a test file that contains
   `@invariant <id>:V<n>` in a test title or a comment.
-- **Docs must exist.** Every app or package folder needs an `AGENTS.md`. Every module folder under
-  `moduleRoots` needs a doc of record whose `code:` is that folder or a folder inside it. The `README.md` of
+- **Docs must exist.** An app or package folder needs an `AGENTS.md` only when it has a gotcha or a pointer of
+  its own. Every module folder under `moduleRoots` needs a doc of record whose `code:` is that folder or a folder inside it. The `README.md` of
   each `docs/` folder lists its docs of record, and the nearest `AGENTS.md` links that index. The
   `check-docs` gate stops a commit that breaks this.
 - **Change the code, change its doc.** The owner of a runtime file is the doc of record with the longest
@@ -275,7 +277,6 @@ the install change must move every item.
 
 `check-docs` fails on:
 
-- a workspace under `runtimeRoots` (a folder with a package manifest) without an `AGENTS.md`
 - a module folder under `moduleRoots` that no doc of record covers
 - a doc of record that the `README.md` index of its `docs/` folder does not list, and an index that the
   nearest `AGENTS.md` does not link
@@ -291,14 +292,23 @@ the install change must move every item.
   that is a writing term of the docs standard
 - a hit of a migration detect check of the docs standard: a plan file, `CONTEXT.md`, "spec of record", an ADR
   status in the body, research sent to a scratchpad, a `## Writing` section in a glossary
-- an ADR status that is not a standard form, a superseding ADR that does not name the old one, a research
-  note without its frontmatter and sections, an open check box in a doc of record, and an API contract that no
-  `AGENTS.md` links
+- an ADR status that is not a standard form, a superseding ADR that does not name the old one, and an ADR
+  that a later ADR says it supersedes while its own status does not name that ADR
+- a research note without its frontmatter and sections
+- an open check box in a doc of record, and a `fn:` or `type:` line in its Interfaces section
+- an API contract that no source file names: a file of the same workspace for a contract in
+  `<workspace>/docs/`, any source file for one in the root `docs/`
+
+`check-docs` prints warnings that never fail the gate, at most 20 lines: a history word (`no longer`,
+`used to`, `today`, `planned`) or a date in a doc of record, and a living doc whose name reads as a dated copy
+(`setup-old.md`, `setup-2025.md`, `setup.v1.md`, a file under `archive/`). A script can suspect these. Only a
+reader can decide them.
 
 `check-sdd` fails on:
 
 - a Markdown link to a file that does not exist
-- an `AGENTS.md` or a doc of record that no other Markdown file links (the root `AGENTS.md` is exempt)
+- an `AGENTS.md`, a doc of record or an API contract that no other Markdown file links (the root `AGENTS.md`
+  is exempt)
 - any `SPEC.md`, and any `@spec <id>:V<n>` citation (the message names the new form)
 - a doc of record without a valid `id:` or without a `code:` folder
 - a `code:` folder that does not exist, that is outside the workspace of the doc, or that two docs name
@@ -339,7 +349,7 @@ resolve an explicit value, the gate fails. It does not silently check one commit
 
 | Key | Meaning |
 |---|---|
-| `runtimeRoots` | Folders that hold application code (`apps`, `packages`, `src`). Each runtime file in them needs an owner. Each workspace inside needs an `AGENTS.md`. The `doc-of-record` rule loads for `<root>/**` of each folder. Detected at install. |
+| `runtimeRoots` | Folders that hold application code (`apps`, `packages`, `src`). Each runtime file in them needs an owner. The `doc-of-record` rule loads for `<root>/**` of each folder. Detected at install. |
 | `moduleRoots` | Folders whose direct children are modules that a doc of record must cover (`apps/*/src/modules`, where `*` is one path segment). Detected once at install, and yours afterwards. An empty list turns the module check off. |
 | `exclude` | Names that the gates skip anywhere (`vendor`), or repo-relative prefixes (`apps/samples`). The gates always skip `.claude/worktrees`, because Claude Code worktrees are full repository copies. |
 | `configGroups` | For the `config` profile: `{ name, source, surfaces: [{ path, mode: "json" \| "text" }] }`. |
@@ -371,7 +381,10 @@ Every message ends with what to do. The most frequent ones:
 | `a module doc is no longer a SPEC.md` | A `SPEC.md` from a version before 1.0.0 is still there. | Move it to a doc of record. See [From 0.6.0 to 1.0.0](#from-060-to-100). |
 | `is the citation form before 1.0.0` | A test or doc still cites `@spec <id>:V<n>`. | Write `@invariant <id>:V<n>` instead. |
 | `does not belong in a doc of record` | A doc of record has a Tasks or Bugs section. | Move open work and bugs to the issue tracker and delete the section. |
-| `missing AGENTS.md: <folder>` (`check-docs`) | An app or package folder has no `AGENTS.md`. | Write one with its gotchas and links to its docs of record. |
+| `no source file names this API contract` (`check-docs`) | No source file holds the file name of the contract. | Name the contract path in the header comment of each source file that serves or reads the wire. |
+| `says it supersedes this ADR, but the status does not name` (`check-docs`) | A later ADR supersedes this one, and the status of this one is silent. | Set `status: 'superseded by ADR-NNNN (<what>, <date>)'`, several joined with " and ". |
+| `restates what the source declares` (`check-docs`) | The Interfaces section of a doc of record has a `fn:` or `type:` line. | Delete the line. Write a rule about the function as an invariant. |
+| `unreachable API contract` | No Markdown file links the contract. | List it in the `README.md` of its `docs/` folder. |
 | `module not covered: <folder>` (`check-docs`) | No doc of record covers a module folder under `moduleRoots`. | Write the doc per `docs/doc-of-record.md` and add its row to the `README.md` index of its `docs/` folder, in the same commit. |
 | `AGENTS.md does not link docs/doc-of-record.md` (`check-docs`) | The pointer line was removed from the root `AGENTS.md`. | Put the line back. Without it, agents skip the docs of record. |
 | `the repository ships AGENTS.md, never CLAUDE.md` (`check-docs`) | A `CLAUDE.md` is in the repository. | Move each line that `AGENTS.md` lacks into the `AGENTS.md` beside it. Then delete the `CLAUDE.md`. |

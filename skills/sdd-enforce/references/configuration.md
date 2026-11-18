@@ -50,7 +50,7 @@ profile only to make the installation look complete.
   "configGroups": [],
   "helmCharts": [],
   "docsStandardLine": "",
-  "docsStandard": { "name": "", "version": "0.9.0" }
+  "docsStandard": { "name": "", "version": "0.10.0" }
 }
 ```
 
