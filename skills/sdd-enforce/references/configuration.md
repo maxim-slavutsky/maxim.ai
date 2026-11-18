@@ -6,7 +6,7 @@ Read when choosing profiles, interpreting CLI output, or configuring generated g
 
 | Profile | Installs | Selection rule |
 |---|---|---|
-| `core` | `docs/agent-parity.md` (with the rules index), `agent-parity` rule + adapter, `committing-changes` skill + twin, docs gate `scripts/check-docs.mjs`, SDD gate `scripts/check-sdd.mjs`, shared gate lib `scripts/sdd-lib.mjs`, Cursor rule generator, post-edit reminder `.claude/hooks/post-edit-reminder.mjs`, hook configs, `docs/map.md` block | Required base |
+| `core` | `docs/agent-parity.md` (with the rules index), `agent-parity` rule + adapter, `commit-changes` skill + twin, docs gate `scripts/check-docs.mjs`, SDD gate `scripts/check-sdd.mjs`, shared gate lib `scripts/sdd-lib.mjs`, Cursor rule generator, post-edit reminder `.claude/hooks/post-edit-reminder.mjs`, hook configs, `docs/map.md` block | Required base |
 | `sdd` | `docs/doc-of-record.md`, `doc-of-record` rule + adapter, doc-of-record + evidence + `Doc-Impact` checks, `AGENTS.md` pointer line | Required base |
 | `config` | `docs/app-config.md`, `app-config-updates` rule + adapter, configured surface propagation check | Runtime config has several copies, schemas, or readers |
 | `helm` | `docs/helm-validation.md`, `validating-helm-charts` skill + twin | Repository owns Helm charts |
@@ -19,7 +19,7 @@ profile only to make the installation look complete.
 | Concern kind | Claude Code | Codex + Cursor |
 |---|---|---|
 | Path-scoped rule (`doc-of-record`, `agent-parity`, `app-config-updates`) | `.claude/rules/<name>.md`: frontmatter `description` + `paths`; body = heading, one link to the concern doc, 3-6 short imperatives | `.agents/skills/<name>/SKILL.md` that links the same concern doc + `agents/openai.yaml`; Cursor also auto-attaches generated `.cursor/rules/<name>.mdc` |
-| Procedure (`committing-changes`, `validating-helm-charts`) | `.claude/skills/<name>/SKILL.md` holds the steps | `.agents/skills/<name>/SKILL.md` links the Claude skill and copies no step + `agents/openai.yaml` |
+| Procedure (`commit-changes`, `validating-helm-charts`) | `.claude/skills/<name>/SKILL.md` holds the steps | `.agents/skills/<name>/SKILL.md` links the Claude skill and copies no step + `agents/openai.yaml` |
 | Rules index | table in `docs/agent-parity.md` (Rules index), rendered at apply from the shipped rules | same file |
 
 - One concern = a rule or a skill, never both. The gate accepts either as the Claude counterpart of
@@ -49,7 +49,8 @@ profile only to make the installation look complete.
   "exclude": ["node_modules", "dist", "build", "coverage", "vendor"],
   "configGroups": [],
   "helmCharts": [],
-  "docsStandardLine": ""
+  "docsStandardLine": "",
+  "docsStandard": { "name": "", "version": "0.9.0" }
 }
 ```
 
@@ -61,6 +62,9 @@ profile only to make the installation look complete.
 | `configGroups` | `config` profile only. See below. |
 | `helmCharts` | `helm` profile only. See below. |
 | `docsStandardLine` | Empty by default. Non-empty: apply inserts it into the root `AGENTS.md` above the pointer line; `check-docs` requires that exact (trimmed) line. |
+| `docsStandard` | `name`: the plugin that holds the organization's docs standard, from the user. `version`: the standard version whose script checks the gates port; apply writes it. `audit --standard <plugin root>` warns when the installed standard is newer. |
+
+`plan` prints `Needs a value:` for an empty `docsStandardLine` or `docsStandard.name`. Ask the user for each one.
 
 Changed `docsStandardLine` or `runtimeRoots`: commit the config, then run `apply --write` again (apply needs a
 clean tree).
@@ -69,21 +73,20 @@ Ownership of a runtime file (`Doc-Impact` gate):
 
 | Case | Owner |
 |---|---|
-| One or more docs of record have a `covers:` glob that matches the file | every such doc |
-| No doc matches, root is `apps`, `packages`, `services`, or `modules` | `<root>/<workspace>/AGENTS.md` |
-| No doc matches, other root (`src`) | `<root>/AGENTS.md` |
+| A doc of record has a `code:` folder that holds the file | the doc with the longest such folder |
+| No doc holds the file | the nearest `AGENTS.md` above it, ending at the root `AGENTS.md` (the one owner in a repo with no workspace) |
 
 Runtime file = under a runtime root, runtime extension, not a test (`*.test.*`, `*.spec.*`, `__tests__/`,
 `test/`, `tests/`), not `*.d.ts`, not under `docs/`.
 
 Doc of record placement:
 
-| `covers:` globs | Path | Linked from |
-|---|---|---|
-| all inside one workspace | `<workspace>/docs/<module>.md` | nearest `AGENTS.md` above that `docs/` folder |
-| span workspaces | `docs/<module>.md` | root `AGENTS.md` |
+| `code:` folder | Path | Listed in | Index linked from |
+|---|---|---|---|
+| inside a workspace | `<workspace>/docs/<module>.md` | `<workspace>/docs/README.md` | nearest `AGENTS.md` above that `docs/` folder |
+| in no workspace | `docs/<module>.md` | `docs/README.md` | root `AGENTS.md` |
 
-A doc in `<workspace>/docs/` with a glob outside that workspace fails. Full shape: `docs/doc-of-record.md` in the
+A doc in `<workspace>/docs/` with a folder outside that workspace fails. Full shape: `docs/doc-of-record.md` in the
 target repository.
 
 `check-docs` also demands an `AGENTS.md` in every workspace: a direct child of a runtime root that carries a

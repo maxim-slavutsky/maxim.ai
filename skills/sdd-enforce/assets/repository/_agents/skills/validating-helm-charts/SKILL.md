@@ -1,6 +1,6 @@
 ---
 name: validating-helm-charts
-description: Validate changed or selected Helm charts with helm lint, helm template, and kubeconform before committing or deploying a chart change; report failures without rewriting charts.
+description: Use before committing or deploying a change to a Helm chart, or when asked to validate charts. Runs helm lint, helm template and kubeconform on the changed or selected charts, and reports failures without rewriting charts.
 ---
 
 # Codex and Cursor adapter

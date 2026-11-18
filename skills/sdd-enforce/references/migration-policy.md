@@ -13,6 +13,7 @@ What `plan`/`apply` do with each file class:
 | Generated + unchanged | Safe to upgrade (`update-generated`) |
 | Generated + locally modified | Kept as is (`keep`); upgrade skips it. To take the tool version: `apply --write --replace <path>` |
 | Pre-existing, identical to template at first apply (`mode: preserved`) | Repository-owned. Never upgraded, never policed by `verify`, never deleted by `uninstall`. Adopt with `apply --write --replace <path>` |
+| Gates and adapters from an older install, but no `.agent-toolchain.json` (the record was deleted) | Every tool path is a conflict. Read each one and move what the repository added (a check, a rule line, a filter table) into its own rule, doc or script. Then take the paths over with `apply --write --replace <path>,<path>`. A one-off takeover needs no other command |
 | Retired file an older version generated (`docs/workflows/*-WORKFLOW.md`, `docs/agent-sdd/FORMAT.md`, `scripts/hooks/post-edit-reminder.mjs`, `spec-first` and `finishing-branch-commit-order` rules + `.mdc`, `spec-first` / `commit-changes` / `validate-helm-charts` skills and adapters, `.claude/rules/INDEX.md`) | Unedited: deleted (`delete`). Edited or preserved: kept and still tracked (`keep`); the gates then fail on it (old name, old form). Move its content where the plan reason says, then delete it by hand |
 | 0.6.0 import line `@./docs/workflows/SPEC-FIRST-WORKFLOW.md` in `AGENTS.md` | Swapped for the tool lines (`update`); other text stays |
 | 0.4.0 `AGENTS.md` block, unedited | Swapped for the tool lines (`update`); text outside the markers stays |
@@ -36,7 +37,7 @@ on each one with no debt list, so the install change moves all of them.
 
 | Item | Move to |
 |---|---|
-| `**/SPEC.md` | `<workspace>/docs/<module>.md`, or root `docs/<module>.md` when its globs span workspaces. Keep `id` and every `V<n>` number (tests cite them). Add `covers:` globs (repo-relative, each matches a file). Headings Goal, Constraints, Interfaces, Invariants, plain prose (no `§` headings, no compressed encoding). Drop Tasks, Bugs, Files tables: open work and bugs to the issue tracker. Wire shapes to an API contract `docs/<subject>-contract.md`; hard-to-reverse decisions to an ADR under `docs/adr/`. Link the doc from the nearest `AGENTS.md` above its `docs/` folder |
+| `**/SPEC.md` | `<workspace>/docs/<module>.md`, or root `docs/<module>.md` when its code is in no workspace. Keep `id` and every `V<n>` number (tests cite them). Add one `code:` folder (repo-relative, the folder the old `SPEC.md` sat in). Headings Goal, Constraints, Interfaces, Invariants, plain prose (no `§` headings, no compressed encoding). Drop Tasks, Bugs, Files tables: open work and bugs to the issue tracker. Wire shapes to an API contract `docs/<subject>-contract.md`; hard-to-reverse decisions to an ADR under `docs/adr/`. List the doc in the `README.md` index of its `docs/` folder, and link the index from the nearest `AGENTS.md` |
 | `@spec <id>:V<n>` | `@invariant <id>:V<n>` |
 | `CLAUDE.md` | Lines `AGENTS.md` lacks into the `AGENTS.md` beside it; delete the file. An `@AGENTS.md` line moves nowhere |
 | Doc under `docs/` with a non-kebab name | `git mv` to kebab-case (the gate message prints the command); update every link |

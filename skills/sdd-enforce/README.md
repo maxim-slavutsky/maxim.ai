@@ -27,7 +27,7 @@ or company. The generated files contain no secrets.
 
 | Term | Meaning |
 |---|---|
-| doc of record | A Markdown file that states what one module does now: goal, constraints, interfaces, and invariants. Its `covers:` globs name the files it owns. |
+| doc of record | A Markdown file that states what one module does now: goal, constraints, interfaces, and invariants. Its `code:` line names the one folder it owns. |
 | invariant | A numbered condition in a doc of record (`V1:`, `V2:`) that always holds. |
 | concern doc | A doc directly under `docs/` that holds the full rules for one concern, for example `docs/agent-parity.md`. |
 | rule | A short file in `.claude/rules/` that Claude Code loads when it reads a matching file. It links one concern doc. |
@@ -153,7 +153,7 @@ With the default profiles (`core,sdd`) and all three tools:
 | `.claude/rules/doc-of-record.md`, `.claude/rules/agent-parity.md` | Claude Code path rules. Each rule holds three to six short imperatives and one link to its concern doc. The `doc-of-record` rule loads for files under your `runtimeRoots`. | Claude Code |
 | `.cursor/rules/*.mdc` | The same rules for Cursor, generated from `.claude/rules` by `scripts/gen-cursor-rules.mjs`. Never edit them by hand. | Cursor |
 | `.agents/skills/<name>/` | Codex and Cursor adapters, each with `agents/openai.yaml` display metadata. The adapter of a rule links the same concern doc as the rule. The twin of a skill links the Claude skill. | Codex, Cursor |
-| `.claude/skills/committing-changes/` | The commit skill: tests, the owner-doc check, the gate trailers, exact staging, and the commit. It works from `git status` and `git diff`. | Claude Code, and Codex and Cursor through its twin |
+| `.claude/skills/commit-changes/` | The commit skill: tests, the owner-doc check, the gate trailers, exact staging, and the commit. It works from `git status` and `git diff`. | Claude Code, and Codex and Cursor through its twin |
 | `.claude/settings.json`, `.codex/hooks.json`, `.cursor/hooks.json` | One post-edit hook entry per tool. Your other settings stay. | each tool |
 | `.claude/hooks/post-edit-reminder.mjs` | The hook script. After the AI edits a file, it reminds the AI to update each doc of record that covers the file and to run the gate. | each tool |
 | `scripts/check-docs.mjs` | The docs gate: the docs exist, other docs link them, and they follow the docs standard. See [Gate reference](#gate-reference). | Git hooks, CI, people |
@@ -186,8 +186,8 @@ the diff, wire the gates (see [Gate reference](#gate-reference)), then commit it
 ## What changes for the team
 
 - **Each module has a doc of record.** It states what the module does now. It lives in
-  `<workspace>/docs/<module>.md`, or in the root `docs/<module>.md` when its globs span workspaces. Its
-  frontmatter has a stable `id:` and `covers:` globs that name the files it owns. The headings are Goal,
+  `<workspace>/docs/<module>.md`, or in the root `docs/<module>.md` when its code is in no workspace. Its
+  frontmatter has a stable `id:` and one `code:` folder that it owns. The headings are Goal,
   Constraints, Interfaces, and Invariants, in plain prose. Only Goal is required. The full shape is in
   `docs/doc-of-record.md`.
 - **Open work goes to the issue tracker.** A doc of record has no task, bug, or file tables. A spec lives in
@@ -196,11 +196,12 @@ the diff, wire the gates (see [Gate reference](#gate-reference)), then commit it
 - **Critical invariants have tests.** An invariant listed under `critical:` needs a test file that contains
   `@invariant <id>:V<n>` in a test title or a comment.
 - **Docs must exist.** Every app or package folder needs an `AGENTS.md`. Every module folder under
-  `moduleRoots` needs a doc of record that covers its files. The nearest `AGENTS.md` above the `docs/` folder
-  of that doc must link it. The `check-docs` gate stops a commit that breaks this.
-- **Change the code, change its doc.** The owners of a runtime file are the docs of record whose `covers:`
-  matches it. When no doc matches, the owner is the workspace `AGENTS.md`. When a commit changes a runtime file
-  and none of its owners, the gate stops the commit. The message must then explain why:
+  `moduleRoots` needs a doc of record whose `code:` is that folder or a folder inside it. The `README.md` of
+  each `docs/` folder lists its docs of record, and the nearest `AGENTS.md` links that index. The
+  `check-docs` gate stops a commit that breaks this.
+- **Change the code, change its doc.** The owner of a runtime file is the doc of record with the longest
+  `code:` folder that holds it. When no doc holds it, the owner is the nearest `AGENTS.md` above it. When a commit
+  changes a runtime file and not its owner, the gate stops the commit. The message must then explain why:
   `Doc-Impact: none - <at least 8 words naming the files and why behavior cannot change>`. A long reason can
   fold over several lines. Start each continuation line with one space, like a Git trailer.
 - **Tools move together.** When a Claude rule or a hook config changes without its partners, the gate fails.
@@ -276,7 +277,8 @@ the install change must move every item.
 
 - a workspace under `runtimeRoots` (a folder with a package manifest) without an `AGENTS.md`
 - a module folder under `moduleRoots` that no doc of record covers
-- a doc of record that the nearest `AGENTS.md` above its `docs/` folder does not link
+- a doc of record that the `README.md` index of its `docs/` folder does not list, and an index that the
+  nearest `AGENTS.md` does not link
 - a root `AGENTS.md` that does not link `docs/doc-of-record.md`
 - a root `AGENTS.md` without the exact `docsStandardLine`, when the config sets one
 - any `CLAUDE.md`
@@ -285,14 +287,22 @@ the install change must move every item.
 - a skill whose frontmatter `name` differs from its folder name
 - a skill `description` of more than 1,024 characters
 - a rule `paths:` glob that matches no file
+- a missing root `AGENTS.md` or `README.md`, a root `README.md` with only headings, and a `GLOSSARY.md` term
+  that is a writing term of the docs standard
+- a hit of a migration detect check of the docs standard: a plan file, `CONTEXT.md`, "spec of record", an ADR
+  status in the body, research sent to a scratchpad, a `## Writing` section in a glossary
+- an ADR status that is not a standard form, a superseding ADR that does not name the old one, a research
+  note without its frontmatter and sections, an open check box in a doc of record, and an API contract that no
+  `AGENTS.md` links
 
 `check-sdd` fails on:
 
 - a Markdown link to a file that does not exist
 - an `AGENTS.md` or a doc of record that no other Markdown file links (the root `AGENTS.md` is exempt)
 - any `SPEC.md`, and any `@spec <id>:V<n>` citation (the message names the new form)
-- a doc of record without a valid `id:` or without `covers:` globs
-- a `covers:` glob that matches no file, or that points outside the workspace of the doc
+- a doc of record without a valid `id:` or without a `code:` folder
+- a `code:` folder that does not exist, that is outside the workspace of the doc, or that two docs name
+- a rule without `paths:`, and a Claude rule without its `.agents` twin
 - a duplicate doc id, a duplicate invariant id, or a `critical:` entry that has no invariant
 - a `Tasks`, `Bugs`, `§T`, or `§B` heading in a doc of record
 - an `@invariant` citation of an unknown doc or invariant
@@ -352,7 +362,7 @@ Every message ends with what to do. The most frequent ones:
 
 | Message contains | Meaning | Fix |
 |---|---|---|
-| `runtime paths lack an owner change` | You changed code but none of its owners: no doc of record that covers it and no workspace `AGENTS.md`. | Update an owner in the same commit. Or add `Doc-Impact: none - <8+ words naming the files and why>` to the commit message. |
+| `runtime paths lack an owner change` | You changed code but none of its owners: no doc of record that holds it and no `AGENTS.md` above it. | Update an owner in the same commit. Or add `Doc-Impact: none - <8+ words naming the files and why>` to the commit message. |
 | `rejected Doc-Impact trailer` | The `none -` reason is too short or too generic, or it does not name the files. | Rewrite the reason. Name each file, say what changed, and say why behavior cannot change. |
 | `critical invariant lacks executable evidence` | An invariant under `critical:` has no test that cites it. | Add `@invariant <id>:V<n>` to a real test that proves the whole invariant. Or ask the owner of the doc to split the invariant or drop `critical`. Never cite a partial test. |
 | `harness paths lack partner change` | A Claude, Codex, or Cursor file changed alone. | Change the partner files too, or add `Agent-Parity: none - <reason>`. |
@@ -362,7 +372,7 @@ Every message ends with what to do. The most frequent ones:
 | `is the citation form before 1.0.0` | A test or doc still cites `@spec <id>:V<n>`. | Write `@invariant <id>:V<n>` instead. |
 | `does not belong in a doc of record` | A doc of record has a Tasks or Bugs section. | Move open work and bugs to the issue tracker and delete the section. |
 | `missing AGENTS.md: <folder>` (`check-docs`) | An app or package folder has no `AGENTS.md`. | Write one with its gotchas and links to its docs of record. |
-| `module not covered: <folder>` (`check-docs`) | No doc of record covers a module folder under `moduleRoots`. | Write the doc per `docs/doc-of-record.md` and link it from the workspace `AGENTS.md`, in the same commit. |
+| `module not covered: <folder>` (`check-docs`) | No doc of record covers a module folder under `moduleRoots`. | Write the doc per `docs/doc-of-record.md` and add its row to the `README.md` index of its `docs/` folder, in the same commit. |
 | `AGENTS.md does not link docs/doc-of-record.md` (`check-docs`) | The pointer line was removed from the root `AGENTS.md`. | Put the line back. Without it, agents skip the docs of record. |
 | `the repository ships AGENTS.md, never CLAUDE.md` (`check-docs`) | A `CLAUDE.md` is in the repository. | Move each line that `AGENTS.md` lacks into the `AGENTS.md` beside it. Then delete the `CLAUDE.md`. |
 | `a doc under docs/ needs a kebab-case name` (`check-docs`) | A doc under `docs/` has capital letters or underscores in its name. | Run the `git mv` command that the message shows, then update every link. |
@@ -395,7 +405,7 @@ What `apply` does for you:
   `commit-changes`, and `validate-helm-charts` skills and adapters.
 - It writes the new files in their place: `docs/doc-of-record.md`, `docs/agent-parity.md`,
   `docs/app-config.md`, `docs/helm-validation.md`, the `doc-of-record` rule and adapter, the
-  `committing-changes` and `validating-helm-charts` skills, `.claude/hooks/post-edit-reminder.mjs`, and
+  `commit-changes` and `validating-helm-charts` skills, `.claude/hooks/post-edit-reminder.mjs`, and
   `scripts/sdd-lib.mjs`.
 - It replaces the line `@./docs/workflows/SPEC-FIRST-WORKFLOW.md` in `AGENTS.md` with the pointer line. Your
   other text stays.
@@ -417,7 +427,7 @@ What you move by hand: there is no migrate command, because moving prose and tab
 
 | Item | What to do |
 |---|---|
-| `SPEC.md` | Move it to `<workspace>/docs/<module>.md`. Keep its `id` and its invariant numbers, because tests cite them. Add `covers:` globs. Use the headings Goal, Constraints, Interfaces, and Invariants, in plain prose. Drop the Tasks, Bugs, and Files tables, and move open work and bugs to the issue tracker. Link the new doc from the workspace `AGENTS.md`. |
+| `SPEC.md` | Move it to `<workspace>/docs/<module>.md`. Keep its `id` and its invariant numbers, because tests cite them. Add a `code:` folder and a row in the index of its `docs/` folder. Use the headings Goal, Constraints, Interfaces, and Invariants, in plain prose. Drop the Tasks, Bugs, and Files tables, and move open work and bugs to the issue tracker. |
 | `@spec <id>:V<n>` in a test or a doc | Rewrite it as `@invariant <id>:V<n>`. |
 | `CLAUDE.md` | Move each line that `AGENTS.md` lacks into the `AGENTS.md` beside it. Then delete the file. An `@AGENTS.md` line moves nowhere. |
 | A doc under `docs/` with a name that is not kebab-case | Rename it with `git mv` and update every link. |

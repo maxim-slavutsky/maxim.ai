@@ -5,11 +5,9 @@
  *
  *   - every workspace under a runtime root (a folder with its own package manifest) carries an AGENTS.md;
  *   - every module folder under a configured module root is covered by a doc of record;
- *   - every doc of record is linked from the nearest AGENTS.md above its docs/ folder;
+ *   - the README.md of each docs/ folder lists its docs of record, and the nearest AGENTS.md links that index;
  *   - the root AGENTS.md links docs/doc-of-record.md, and carries "docsStandardLine" when the config sets one;
- *   - no CLAUDE.md, kebab-case names under docs/, AGENTS.md under 200 lines, SKILL.md under 500 lines, a skill
- *     name equal to its folder name, a skill description of at most 1,024 characters, and rule paths: globs that
- *     each match a file.
+ *   - the checks of the docs standard that a script can decide, in scripts/docs-standard.mjs.
  *
  * Nothing here inspects meaning. scripts/check-sdd.mjs owns link resolution, doc-of-record frontmatter, evidence,
  * and agent parity. Both run in pre-commit and CI.
@@ -19,18 +17,17 @@
  * Configuration: .agent-sdd/config.json ("runtimeRoots", "moduleRoots", "exclude", "docsStandardLine").
  * Shapes: docs/doc-of-record.md.
  */
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { docsOfRecord, frontmatter, frontmatterList, frontmatterScalar, matchesGlob, normalize, skipRules, walkFiles } from './sdd-lib.mjs';
+import { standardProblems } from './docs-standard.mjs';
+import { docsOfRecord, normalize, skipRules, walkFiles } from './sdd-lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_PATH = join(ROOT, '.agent-sdd', 'config.json');
 const DOC_RULES = 'docs/doc-of-record.md';
 const WORKSPACE_MANIFESTS = ['package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle', 'Chart.yaml'];
-const MAX_AGENTS_LINES = 200;
-const MAX_SKILL_LINES = 500;
-const MAX_DESCRIPTION = 1024;
 const problems = [];
 const fail = (message) => problems.push(message);
 const rel = (path) => relative(ROOT, path).replaceAll('\\', '/');
@@ -48,7 +45,6 @@ if (!config) {
 const { isSkipped } = skipRules(config);
 const allFiles = walkFiles(ROOT, config);
 const read = (path) => normalize(readFileSync(join(ROOT, path), 'utf8'));
-const lineCount = (body) => body.replace(/\n$/, '').split('\n').length;
 
 function directories(path) {
   if (!existsSync(path) || !statSync(path).isDirectory()) return [];
@@ -95,11 +91,21 @@ function nearestAgents(dir) {
 function linkTargets(path) {
   const out = new Set();
   for (const match of read(path).matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
-    const target = match[1].trim().replace(/^<|>$/g, '').split('#')[0].split('?')[0];
+    let target = match[1].trim().replace(/^<|>$/g, '').split('#')[0].split('?')[0];
     if (!target || /^[a-z]+:/i.test(target)) continue;
+    try {
+      target = decodeURIComponent(target);
+    } catch {
+      // A bad escape stays literal; the link then names no file.
+    }
     out.add(rel(resolve(ROOT, dirname(path), target)));
   }
   return out;
+}
+
+/** The index that lists a doc of record: the README.md of its docs/ folder. */
+function indexPath(doc) {
+  return `${dirname(doc.path)}/README.md`;
 }
 
 // 1. Every workspace under a runtime root carries an AGENTS.md.
@@ -114,31 +120,39 @@ function checkWorkspaces() {
   }
 }
 
-// 2 + 3. Every module folder is covered by a doc of record, and the nearest AGENTS.md links every doc of record.
+// 2 + 3. Every module folder is covered by a doc of record, its docs/README.md lists it, and the nearest AGENTS.md links that index.
 function checkModules(docs) {
   for (const pattern of config?.moduleRoots ?? []) {
     for (const moduleRoot of expand(pattern)) {
       for (const module of directories(moduleRoot)) {
-        const prefix = `${rel(module)}/`;
-        const moduleFiles = allFiles.filter((path) => path.startsWith(prefix));
-        const covered = moduleFiles.some((path) => docs.some((doc) => doc.covers.some((glob) => matchesGlob(path, glob))));
+        // A parent doc does not cover a module: with it, one doc for "src" would cover every module.
+        const folder = rel(module);
+        const covered = docs.some((doc) => doc.code && (doc.code === folder || doc.code.startsWith(`${folder}/`)));
         if (!covered) {
           fail(
-            `module not covered: ${rel(module)}. Every module under "${pattern}" needs a doc of record whose "covers:" matches its files ` +
+            `module not covered: ${folder}. Every module under "${pattern}" needs a doc of record whose "code:" is that folder or a folder inside it ` +
               `(shape in ${DOC_RULES}); write it, or remove the folder from "moduleRoots" in .agent-sdd/config.json.`,
           );
         }
       }
     }
   }
+  const indexes = new Set();
   for (const doc of docs) {
-    const docsDir = dirname(doc.path);
-    const owner = docsDir === 'docs' ? '' : docsDir.slice(0, -'/docs'.length);
-    const agents = nearestAgents(owner);
+    const index = indexPath(doc);
+    if (!existsSync(join(ROOT, index)) || !linkTargets(index).has(doc.path)) {
+      fail(`${index} does not list ${doc.path}. Each docs/ folder indexes its docs of record in its README.md: add a link row for it.`);
+    }
+    indexes.add(index);
+  }
+  // The AGENTS.md links the index, not each doc, so it stays short however many modules the workspace has.
+  for (const index of indexes) {
+    const docsDir = dirname(index);
+    const agents = nearestAgents(docsDir === 'docs' ? '' : docsDir.slice(0, -'/docs'.length));
     if (!agents) {
-      fail(`${doc.path} has no AGENTS.md above it. Add an AGENTS.md to the workspace and link the doc of record from it.`);
-    } else if (!linkTargets(agents).has(doc.path)) {
-      fail(`${agents} does not link ${doc.path}. Add a Markdown link to it so readers can find the doc of record.`);
+      fail(`${index} has no AGENTS.md above it. Add an AGENTS.md to the workspace and link the index from it.`);
+    } else if (!linkTargets(agents).has(index)) {
+      fail(`${agents} does not link ${index}. Add one Markdown link to the index so readers find every doc of record.`);
     }
   }
 }
@@ -148,10 +162,7 @@ function checkRootAgents() {
   const sdd = (config?.profiles ?? []).includes('sdd');
   const standard = String(config?.docsStandardLine ?? '').trim();
   if (!sdd && !standard) return;
-  if (!existsSync(join(ROOT, 'AGENTS.md'))) {
-    fail(`missing AGENTS.md at the repository root. Re-run the sdd-enforce "apply --write" command to create it with the line that links ${DOC_RULES}.`);
-    return;
-  }
+  if (!existsSync(join(ROOT, 'AGENTS.md'))) return; // checkStandard reports the missing file.
   if (sdd && !linkTargets('AGENTS.md').has(DOC_RULES)) {
     fail(`AGENTS.md does not link ${DOC_RULES}. Restore the line that points at it, so every agent reads the doc of record before an edit.`);
   }
@@ -160,47 +171,11 @@ function checkRootAgents() {
   }
 }
 
-// 5. The docs standard: where docs live, how they are named, and how large agent docs may grow.
+// 5. The checks of the docs standard that a script can decide (scripts/docs-standard.mjs).
 function checkStandard() {
-  for (const path of allFiles) {
-    const name = basename(path);
-    if (name === 'CLAUDE.md') {
-      fail(`${path}: the repository ships AGENTS.md, never CLAUDE.md, because a CLAUDE.md hides every AGENTS.md from Claude Code. Move each line that AGENTS.md lacks into the AGENTS.md beside it, then delete ${path}.`);
-    }
-    if (/(?:^|\/)docs\/(?:.*\/)?[^/]*[A-Z_][^/]*\.md$/.test(path) && !['README.md', 'AGENTS.md'].includes(name)) {
-      const target = path.slice(0, -name.length) + name.replace(/\.md$/, '').replace(/_/g, '-').replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase() + '.md';
-      fail(`${path}: a doc under docs/ needs a kebab-case name. Run "git mv ${path} ${target}" and update every link to it.`);
-    }
-    if (name === 'AGENTS.md' && lineCount(read(path)) >= MAX_AGENTS_LINES) {
-      fail(`${path} has ${lineCount(read(path))} lines; keep an AGENTS.md under ${MAX_AGENTS_LINES}. Move reference material into the docs it points at.`);
-    }
-    if (name === 'SKILL.md') checkSkill(path);
-  }
-  for (const path of allFiles.filter((item) => /^\.claude\/rules\/[^/]+\.md$/.test(item))) {
-    const block = frontmatter(read(path));
-    for (const glob of (block ? frontmatterList(block, 'paths') : null) ?? []) {
-      if (!allFiles.some((file) => matchesGlob(file, glob))) {
-        fail(`${path}: the "paths:" glob "${glob}" matches no file, so the rule never loads there. Fix the glob or remove it.`);
-      }
-    }
-  }
-}
-
-function checkSkill(path) {
-  const body = read(path);
-  if (lineCount(body) >= MAX_SKILL_LINES) {
-    fail(`${path} has ${lineCount(body)} lines; keep a SKILL.md under ${MAX_SKILL_LINES}. Move reference material one level down into references/.`);
-  }
-  const block = frontmatter(body);
-  const folder = basename(dirname(path));
-  const name = block ? frontmatterScalar(block, 'name') : null;
-  if (name !== folder) {
-    fail(`${path}: the frontmatter "name" is ${name === null ? 'missing' : `"${name}"`}; set it to the folder name "${folder}".`);
-  }
-  const description = block ? (frontmatterScalar(block, 'description') ?? '') : '';
-  if (description.length > MAX_DESCRIPTION) {
-    fail(`${path}: the description has ${description.length} characters; keep it at most ${MAX_DESCRIPTION}.`);
-  }
+  // Git decides what is ignored; outside a Git checkout nothing is.
+  const isIgnored = (path) => spawnSync('git', ['check-ignore', '-q', path], { cwd: ROOT }).status === 0;
+  for (const problem of standardProblems({ files: allFiles, read, isIgnored })) fail(problem);
 }
 
 function main() {

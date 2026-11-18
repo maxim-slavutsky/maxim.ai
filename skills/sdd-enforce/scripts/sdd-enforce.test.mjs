@@ -28,7 +28,7 @@ function fixture() {
   git(root, ['config', 'user.name', 'SDD Enforce Test']);
   git(root, ['config', 'user.email', 'sdd-enforce@example.invalid']);
   git(root, ['config', 'core.autocrlf', 'false']);
-  writeFileSync(join(root, 'README.md'), '# Fixture\n', 'utf8');
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\nA repository for the sdd-enforce tests.\n', 'utf8');
   mkdirSync(join(root, 'src'), { recursive: true });
   writeFileSync(join(root, 'src', 'index.js'), 'export const index = 0;\n', 'utf8');
   git(root, ['add', '.']);
@@ -91,17 +91,24 @@ function runtimeCommit(root, name, message) {
   return git(root, ['rev-parse', 'HEAD']);
 }
 
-/** A doc of record at `relPath`, linked from the root AGENTS.md so both gates can reach it. */
-function writeDoc(root, relPath, { id, covers = ['src/**'], critical = [], body = '## Goal\n\nThe fixture exists.\n' }) {
+/** Adds a link line to a Markdown file (created with `heading`) unless it links `target` already. */
+function addLink(root, file, target, label, heading) {
+  const path = join(root, file);
+  const body = existsSync(path) ? readFileSync(path, 'utf8') : `${heading}\n`;
+  if (!body.includes(`](${target})`)) writeFileSync(path, `${body.trimEnd()}\n\n- [${label}](${target})\n`, 'utf8');
+}
+
+/** A doc of record at `relPath`, listed in its docs/README.md index, which the root AGENTS.md links. */
+function writeDoc(root, relPath, { id, code = 'src', critical = [], body = '## Goal\n\nThe fixture exists.\n' }) {
   const lines = ['---', `id: ${id}`];
-  if (covers) lines.push('covers:', ...covers.map((glob) => `  - '${glob}'`));
+  if (code !== null) lines.push(`code: ${code}`);
   if (critical.length) lines.push('critical:', ...critical.map((item) => `  - ${item}`));
   lines.push('---', '', `# ${id}`, '', body);
   mkdirSync(dirname(join(root, relPath)), { recursive: true });
   writeFileSync(join(root, relPath), lines.join('\n'), 'utf8');
-  const agentsPath = join(root, 'AGENTS.md');
-  const agents = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf8') : '# Fixture agents\n';
-  if (!agents.includes(`](${relPath})`)) writeFileSync(agentsPath, `${agents.trimEnd()}\n\n- [${id}](${relPath})\n`, 'utf8');
+  const index = `${dirname(relPath)}/README.md`;
+  addLink(root, index, relPath.slice(dirname(relPath).length + 1), id, '# Docs of record');
+  addLink(root, 'AGENTS.md', index, 'docs of record', '# Fixture agents');
 }
 
 const NO_IMPACT = 'exports a fixture constant without observable runtime behavior';
@@ -149,6 +156,10 @@ const LEGACY_06_FILES = {
   '.claude/rules/spec-first.md': '---\ndescription: old\npaths:\n  - "src/**"\n---\n\n# SPEC-first\n',
   '.cursor/rules/spec-first.mdc': '---\ndescription: old\n---\n',
   '.claude/rules/finishing-branch-commit-order.md': '---\ndescription: old\n---\n\n# Flush the log\n',
+};
+
+/** Files a 0.6.0 install generated under a name 1.0.0 still ships: the upgrade rewrites them. */
+const UPGRADED_06_FILES = {
   '.claude/skills/commit-changes/SKILL.md': '---\nname: commit-changes\ndescription: old\n---\n',
   '.agents/skills/commit-changes/SKILL.md': '---\nname: commit-changes\ndescription: old\n---\n',
   '.agents/skills/commit-changes/agents/openai.yaml': 'interface:\n  display_name: "Commit changes"\n',
@@ -160,7 +171,7 @@ function legacy06Installed({ editCommitWorkflow = false } = {}) {
   const manifestPath = join(root, '.agent-toolchain.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   manifest.generator.version = '0.6.0';
-  for (const [path, content] of Object.entries(LEGACY_06_FILES)) {
+  for (const [path, content] of Object.entries({ ...LEGACY_06_FILES, ...UPGRADED_06_FILES })) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), content, 'utf8');
     manifest.managedFiles[path] = { kind: 'generated', mode: 'created', sha256: sha256(content) };
@@ -269,8 +280,8 @@ test('apply is idempotent, follows rule-vs-skill ownership, and verifies', () =>
   assert.equal(existsSync(join(root, '.claude', 'skills', 'agent-parity')), false);
   assert.match(readFileSync(join(root, '.claude', 'rules', 'doc-of-record.md'), 'utf8'), /paths:\n  - "src\/\*\*"\n/);
   // Procedure: Claude skill + twin that links it.
-  assert.ok(existsSync(join(root, '.claude', 'skills', 'committing-changes', 'SKILL.md')));
-  assert.match(readFileSync(join(root, '.agents', 'skills', 'committing-changes', 'SKILL.md'), 'utf8'), /\.claude\/skills\/committing-changes\/SKILL\.md/);
+  assert.ok(existsSync(join(root, '.claude', 'skills', 'commit-changes', 'SKILL.md')));
+  assert.match(readFileSync(join(root, '.agents', 'skills', 'commit-changes', 'SKILL.md'), 'utf8'), /\.claude\/skills\/commit-changes\/SKILL\.md/);
   for (const name of readdirSync(join(root, '.agents', 'skills'))) {
     assert.ok(existsSync(join(root, '.agents', 'skills', name, 'agents', 'openai.yaml')), `${name} openai.yaml`);
   }
@@ -331,32 +342,71 @@ test('gate rejects stale Cursor mirror after Claude rule edit [@invariant sdd-en
   assert.match(checked.stderr, /\.cursor\/rules\/stray\.mdc has no source rule/);
 });
 
-test('a doc of record needs id and live covers, and holds no Tasks or Bugs [@invariant sdd-enforce.gates:V1]', () => {
+test('a doc of record needs id and one live code: folder inside its workspace [@invariant sdd-enforce.gates:V1]', () => {
   const root = installed();
   writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: '## Invariants\n\nV1: Fixture remains stable.\n\n## Tasks\n\nT1|.|later|V1\n' });
   let checked = gate(root);
   assert.notEqual(checked.status, 0);
   assert.match(checked.stderr, /docs\/core\.md: "## Tasks" does not belong in a doc of record/);
 
-  writeDoc(root, 'docs/core.md', { id: 'fixture.core', covers: null, body: '## Invariants\n\nV1: Fixture remains stable.\n\n## §B bugs\n' });
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', code: null, body: '## Invariants\n\nV1: Fixture remains stable.\n\n## §B bugs\n' });
   checked = gate(root);
-  assert.match(checked.stderr, /docs\/core\.md has no "covers:" globs/);
+  assert.match(checked.stderr, /docs\/core\.md has no "code:" folder/);
   assert.match(checked.stderr, /"## §B bugs" does not belong/);
 
-  writeDoc(root, 'docs/core.md', { id: 'fixture.core', covers: ['lib/**'], body: '## Invariants\n\nV1: Fixture remains stable.\n' });
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', code: 'lib', body: '## Invariants\n\nV1: Fixture remains stable.\n' });
   checked = gate(root);
-  assert.match(checked.stderr, /the "covers:" glob "lib\/\*\*" matches no file/);
+  assert.match(checked.stderr, /docs\/core\.md: the "code:" folder "lib" does not exist/);
 
-  writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: '## Invariants\n\nV1: Fixture remains stable.\n' });
+  // A backslash and a trailing slash are Windows habits; the gate reads the same folder.
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', code: 'src\\', body: '## Invariants\n\nV1: Fixture remains stable.\n' });
   checked = gate(root);
   assert.equal(checked.status, 0, checked.stderr);
   assert.equal(docsGate(root).status, 0, docsGate(root).stderr);
 
-  // A doc of record in a workspace docs/ folder covers that workspace only.
-  writeFileSync(join(root, 'src', 'package.json'), '{ "name": "src" }\n', 'utf8');
-  writeDoc(root, 'src/docs/web.md', { id: 'fixture.web', covers: ['README.md'] });
+  // CRLF line endings in the frontmatter read the same.
+  const corePath = join(root, 'docs', 'core.md');
+  writeFileSync(corePath, readFileSync(corePath, 'utf8').replaceAll('\n', '\r\n'), 'utf8');
   checked = gate(root);
-  assert.match(checked.stderr, /src\/docs\/web\.md: the "covers:" glob "README\.md" is outside src/);
+  assert.equal(checked.status, 0, checked.stderr);
+
+  // One folder has one doc.
+  writeDoc(root, 'docs/other.md', { id: 'fixture.other' });
+  checked = gate(root);
+  assert.match(checked.stderr, /docs\/core\.md and docs\/other\.md both claim the "code:" folder "src"/);
+  rmSync(join(root, 'docs', 'other.md'));
+
+  // A doc of record in a workspace docs/ folder owns a folder of that workspace only.
+  writeFileSync(join(root, 'src', 'package.json'), '{ "name": "src" }\n', 'utf8');
+  mkdirSync(join(root, 'tools'), { recursive: true });
+  writeFileSync(join(root, 'tools', 'build.js'), 'export const build = 1;\n', 'utf8');
+  writeDoc(root, 'src/docs/web.md', { id: 'fixture.web', code: 'tools' });
+  checked = gate(root);
+  assert.match(checked.stderr, /src\/docs\/web\.md: the "code:" folder "tools" is outside src/);
+});
+
+test('the owner of a runtime file is the doc with the longest code: folder [@invariant sdd-enforce.gates:V18]', () => {
+  const root = installed();
+  mkdirSync(join(root, 'src', 'auth'), { recursive: true });
+  writeFileSync(join(root, 'src', 'auth', 'login.js'), 'export const login = 1;\n', 'utf8');
+  writeDoc(root, 'docs/app.md', { id: 'fixture.app', code: 'src' });
+  writeDoc(root, 'docs/auth.md', { id: 'fixture.auth', code: 'src/auth' });
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', `docs: add the owner docs\n\nDoc-Impact: none - src/auth/login.js ${NO_IMPACT}`]);
+
+  const messagePath = join(root, '.git', 'TEST_COMMIT_MSG');
+  writeFileSync(messagePath, 'feat: change login\n', 'utf8');
+  writeFileSync(join(root, 'src', 'auth', 'login.js'), 'export const login = 2;\n', 'utf8');
+  writeFileSync(join(root, 'docs', 'app.md'), `${readFileSync(join(root, 'docs', 'app.md'), 'utf8')}\nThe parent doc changed.\n`, 'utf8');
+  git(root, ['add', 'src/auth/login.js', 'docs/app.md']);
+  let checked = gate(root, ['--staged', '--commit-msg', messagePath]);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /src\/auth\/login\.js \(owner: docs\/auth\.md\)/);
+
+  writeFileSync(join(root, 'docs', 'auth.md'), `${readFileSync(join(root, 'docs', 'auth.md'), 'utf8')}\nLogin returns 2.\n`, 'utf8');
+  git(root, ['add', 'docs/auth.md']);
+  checked = gate(root, ['--staged', '--commit-msg', messagePath]);
+  assert.equal(checked.status, 0, checked.stderr);
 });
 
 test('the gate fails on a SPEC.md and on an @spec citation, and names the new form [@invariant sdd-enforce.gates:V1]', () => {
@@ -470,7 +520,8 @@ test('a staged runtime edit needs a covering doc of record or a concrete Doc-Imp
   writeFileSync(messagePath, 'feat: add feature\n', 'utf8');
   let checked = gate(root, ['--staged', '--commit-msg', messagePath]);
   assert.notEqual(checked.status, 0);
-  assert.match(checked.stderr, /runtime paths lack an owner change: src\/feature\.js \(owner: none found/);
+  // A repo with no workspace: the root AGENTS.md is the owner when no doc holds the file.
+  assert.match(checked.stderr, /runtime paths lack an owner change: src\/feature\.js \(owner: AGENTS\.md\)/);
 
   writeFileSync(messagePath, 'feat: add feature\n\nDoc-Impact: none - refactor only in src/feature.js with no behavior change at all\n', 'utf8');
   checked = gate(root, ['--staged', '--commit-msg', messagePath]);
@@ -485,7 +536,7 @@ test('a staged runtime edit needs a covering doc of record or a concrete Doc-Imp
   checked = gate(root, ['--staged', '--commit-msg', messagePath]);
   assert.equal(checked.status, 0, checked.stderr);
 
-  // A doc of record whose covers match the file owns it: staging the doc with the code needs no trailer.
+  // The doc of record whose code: folder holds the file owns it: staging the doc with the code needs no trailer.
   writeDoc(root, 'docs/core.md', { id: 'fixture.core' });
   writeFileSync(messagePath, 'feat: add feature\n', 'utf8');
   checked = gate(root, ['--staged', '--commit-msg', messagePath]);
@@ -551,16 +602,16 @@ test('waivers skip a named commit in --changed mode only [@invariant sdd-enforce
 
 test('adapters need Codex metadata and the right links: rule to concern doc and back, twin to skill [@invariant sdd-enforce.gates:V5]', () => {
   const root = installed();
-  rmSync(join(root, '.agents', 'skills', 'committing-changes', 'agents'), { recursive: true });
+  rmSync(join(root, '.agents', 'skills', 'commit-changes', 'agents'), { recursive: true });
   let checked = gate(root);
   assert.notEqual(checked.status, 0);
-  assert.match(checked.stderr, /committing-changes lacks agents\/openai\.yaml/);
+  assert.match(checked.stderr, /commit-changes lacks agents\/openai\.yaml/);
   git(root, ['checkout', '--', '.']);
 
-  const twin = join(root, '.agents', 'skills', 'committing-changes', 'SKILL.md');
-  writeFileSync(twin, readFileSync(twin, 'utf8').replace(/\[committing-changes\]\([^)]+\)/, 'the Claude skill'), 'utf8');
+  const twin = join(root, '.agents', 'skills', 'commit-changes', 'SKILL.md');
+  writeFileSync(twin, readFileSync(twin, 'utf8').replace(/\[commit-changes\]\([^)]+\)/, 'the Claude skill'), 'utf8');
   checked = gate(root);
-  assert.match(checked.stderr, /\.agents\/skills\/committing-changes\/SKILL\.md does not link \.claude\/skills\/committing-changes\/SKILL\.md/);
+  assert.match(checked.stderr, /\.agents\/skills\/commit-changes\/SKILL\.md does not link \.claude\/skills\/commit-changes\/SKILL\.md/);
   git(root, ['checkout', '--', '.']);
 
   const ruleTwin = join(root, '.agents', 'skills', 'doc-of-record', 'SKILL.md');
@@ -637,7 +688,7 @@ test('gate messages say what is wrong and how to fix it', () => {
   assert.match(checked.stderr, /README\.md links to "docs\/missing\.md" but that file does not exist/);
 
   writeFileSync(join(root, 'src', 'core.test.js'), "test('holds [@invariant fixture.core:V1]', () => {});\n", 'utf8');
-  writeFileSync(join(root, 'README.md'), '# Fixture\n', 'utf8');
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\nA repository for the sdd-enforce tests.\n', 'utf8');
   assert.equal(gate(root).status, 0, gate(root).stderr);
 
   writeFileSync(join(root, 'src', 'feature.js'), 'export const value = 1;\n', 'utf8');
@@ -660,7 +711,7 @@ test('post-edit reminder tells the agent what to do next in plain words', () => 
   assert.equal(result.status, 0, result.stderr);
   const context = JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
   assert.match(context, /You edited src\/a\.js/);
-  assert.match(context, /doc of record whose covers: matches/);
+  assert.match(context, /the doc of record whose code: folder holds/);
   assert.match(context, /Doc-Impact: none - /);
   assert.match(context, /node scripts\/check-sdd\.mjs/);
   assert.doesNotMatch(context, /changes-log/);
@@ -837,12 +888,16 @@ test('upgrade from 0.6.0 removes retired files, the CLAUDE.md import and the .gi
   for (const path of [...Object.keys(LEGACY_06_FILES), 'CLAUDE.md', '.gitignore']) {
     assert.match(planned.stdout, new RegExp(`delete\\s+${path.replace(/[.]/g, '\\.')}`), `${path} deleted`);
   }
+  for (const path of Object.keys(UPGRADED_06_FILES)) {
+    assert.match(planned.stdout, new RegExp(`update-generated\\s+${path.replace(/[.]/g, '\\.')}`), `${path} upgraded`);
+  }
   assert.match(planned.stdout, /update\s+AGENTS\.md/);
   assert.match(planned.stdout, /create\s+docs\/map\.md/);
 
   const applied = run(['apply', root, '--write']);
   assert.equal(applied.status, 0, applied.stderr);
   for (const path of [...Object.keys(LEGACY_06_FILES), 'CLAUDE.md', '.gitignore']) assert.equal(existsSync(join(root, path)), false, `${path} gone`);
+  assert.match(readFileSync(join(root, '.claude', 'skills', 'commit-changes', 'SKILL.md'), 'utf8'), /^disable-model-invocation: true$/m);
   assert.equal(readFileSync(join(root, 'AGENTS.md'), 'utf8'), `# Repository agent instructions\n\n${POINTER}\n`);
   for (const path of ['.claude/settings.json', '.codex/hooks.json', '.cursor/hooks.json']) {
     const body = readFileSync(join(root, path), 'utf8');
@@ -904,6 +959,290 @@ test('check-docs applies the docs standard: no CLAUDE.md, kebab-case docs, sizes
   assert.match(checked.stderr, /\.claude\/rules\/lib\.md: the "paths:" glob "lib\/\*\*" matches no file/);
 });
 
+test('check-docs applies the rubric script criteria: root README, root AGENTS.md, glossary terms [@invariant sdd-enforce.gates:V16]', () => {
+  const root = installed();
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\n', 'utf8');
+  writeFileSync(join(root, 'GLOSSARY.md'), '# Glossary\n\n**Bet slip**:\nThe bets a user collects.\n\n**Spec**:\nA plan.\n', 'utf8');
+  let checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /README\.md holds only a heading/);
+  assert.match(checked.stderr, /GLOSSARY\.md: the term "Spec" collides with the writing term "Spec"/);
+  assert.doesNotMatch(checked.stderr, /Bet slip/);
+
+  rmSync(join(root, 'AGENTS.md'));
+  checked = docsGate(root);
+  assert.match(checked.stderr, /missing AGENTS\.md at the repository root/);
+});
+
+test('check-docs fails on each migration detect hit and names the migration and its step [@invariant sdd-enforce.gates:V20]', () => {
+  const root = installed();
+  const hits = [
+    ['docs/plans/cashout.md', '# Cashout plan\n', 'plans-in-jira-not-files'],
+    ['docs/superpowers/specs/2026-01-01-a-design.md', '# Design\n', 'plans-in-jira-not-files'],
+    ['tasks/todo.md', '- write it\n', 'plans-in-jira-not-files'],
+    ['CONTEXT.md', '# Context\n', 'context-md-to-glossary-md'],
+    ['docs/notes.md', '# Notes\n\nThis is the Spec of Record for cashout.\n', 'spec-of-record-to-doc-of-record'],
+    ['docs/adr/0001-postgres.md', "---\nstatus: 'accepted'\n---\n\n# Postgres\n\n**Status**: accepted\n", 'adr-status-in-frontmatter'],
+    ['GLOSSARY.md', '# Glossary\n\n## Writing\n', 'writing-terms-out-of-glossary'],
+    ['apps/web/AGENTS.md', '# web\n\nResearch lives in the session scratchpad.\n', 'research-notes-in-docs-research'],
+  ];
+  for (const [path, body] of hits) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body, 'utf8');
+  }
+  let checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  for (const [path, , slug] of hits) {
+    assert.match(checked.stderr, new RegExp(`${path.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}: .*migration "${slug}"`), `${path} hits ${slug}`);
+  }
+
+  // Test fixtures, docs/map.md and gitignored files are outside the checks, as in the audit.
+  for (const [path] of hits) rmSync(join(root, path));
+  for (const path of ['evals/case/docs/plans/x.md', 'fixtures/CONTEXT.md', '.scratch/plan.md']) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), '# Plan\n', 'utf8');
+  }
+  writeFileSync(join(root, '.gitignore'), '.scratch/\n', 'utf8');
+  writeFileSync(join(root, 'docs', 'map.md'), `${readFileSync(join(root, 'docs', 'map.md'), 'utf8')}\nNo spec of record here.\n`, 'utf8');
+  checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('check-docs fails on an ADR status form, a one-sided supersession, a bare research note, an open box and an unlinked contract [@invariant sdd-enforce.gates:V21]', () => {
+  const root = installed();
+  const write = (path, body) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body, 'utf8');
+  };
+  const adr = (status, body = '') => `---\nstatus: '${status}'\n---\n\n# A decision\n\nDecided 2026-01-01 (T-1). ${body}\n`;
+  write('docs/adr/0001-x.md', adr('proposed'));
+  let checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /docs\/adr\/0001-x\.md: status "proposed" is not a standard form/);
+
+  write('docs/adr/0001-x.md', adr('superseded by ADR-0002 (y, 2026-02-01)'));
+  write('docs/adr/0002-y.md', adr('accepted'));
+  checked = docsGate(root);
+  assert.match(checked.stderr, /docs\/adr\/0002-y\.md does not name ADR-0001/);
+
+  // Superseding ADRs in one status, each naming the old one in its own way: ADR-0001, a link, or decision D1.
+  write('docs/adr/0001-x.md', adr('superseded in part by ADR-0002 (a, 2026-01-01) and ADR-0003 (b, 2026-02-01) and ADR-0004 (c, 2026-03-01)'));
+  write('docs/adr/0002-y.md', adr('accepted', 'It builds on ADR-0001.'));
+  write('docs/adr/0003-z.md', adr('accepted', 'It replaces part of [ADR 0001](0001-x.md).\n\n- [ ] an old line, kept with its date'));
+  write('docs/adr/0004-w.md', adr('accepted', 'It narrows §D1 V3.'));
+  write('docs/research/q.md', '# Q\n');
+  // A checklist in a guide is a procedure. Only a doc of record holds no open work.
+  write('docs/agent-parity.md', `${readFileSync(join(root, 'docs', 'agent-parity.md'), 'utf8')}\nBefore you open the PR, check:\n\n- [ ] the adapter links the rule\n`);
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: '## Goal\n\nThe fixture exists.\n\n```text\n- [ ] an example inside a fence\n```\n\n- [ ] later\n' });
+  write('apps/api/package.json', '{ "name": "api" }\n');
+  write('apps/api/AGENTS.md', '# api\n\n- [Docs and contracts](docs/README.md)\n');
+  write('apps/api/docs/README.md', '# api docs\n\n- [payments contract](payments-contract.md)\n');
+  write('apps/api/docs/payments-contract.md', '# Payments contract\n');
+  write('apps/api/docs/orders-contract.md', '# Orders contract\n');
+  checked = docsGate(root);
+  assert.doesNotMatch(checked.stderr, /docs\/adr\//);
+  assert.match(checked.stderr, /docs\/research\/q\.md needs frontmatter "date:"/);
+  assert.match(checked.stderr, /docs\/core\.md:\d+: an open check box/);
+  assert.equal((checked.stderr.match(/docs\/core\.md:\d+: an open check box/g) ?? []).length, 1, 'the fenced box is an example');
+  assert.doesNotMatch(checked.stderr, /agent-parity\.md:\d+: an open check box/);
+  assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/docs\/orders-contract\.md/);
+  // The workspace index that AGENTS.md links counts as the link to a contract.
+  assert.doesNotMatch(checked.stderr, /payments-contract/);
+
+  write('docs/research/q.md', '---\ndate: 2026-01-01\nquestion: Why is it slow?\n---\n\n# Q\n\nThe cache is cold.\n\n## Findings\n\n- One miss per call.\n\n## Not covered\n\n- Load.\n');
+  writeDoc(root, 'docs/core.md', { id: 'fixture.core' });
+  write('apps/api/docs/README.md', '# api docs\n\n- [payments contract](payments-contract.md)\n- [orders contract](orders-contract.md)\n');
+  checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('a rule needs paths: and an .agents twin when Codex or Cursor is on [@invariant sdd-enforce.gates:V22]', () => {
+  const root = installed();
+  writeFileSync(join(root, '.claude', 'rules', 'x.md'), '---\ndescription: x\n---\n\n# X\n\nThe rules: [agent parity](../../docs/agent-parity.md).\n', 'utf8');
+  const checked = gate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /\.claude\/rules\/x\.md has no "paths:"/);
+  assert.match(checked.stderr, /Claude rule lacks \.agents counterpart: x/);
+});
+
+test('a rule may link a concern doc in a folder that docs/map.md declares [@invariant sdd-enforce.gates:V22]', () => {
+  const root = installed();
+  const write = (path, body) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body, 'utf8');
+  };
+  write('.claude/rules/y.md', '---\ndescription: y\npaths:\n  - "src/**"\n---\n\n# Y\n\nThe rules: [y](../../docs/workflows/y.md).\n');
+  write('docs/workflows/y.md', '# Y\n\nLoaded by [the rule](../../.claude/rules/y.md).\n');
+  write('.agents/skills/y/SKILL.md', '---\nname: y\ndescription: Use when editing src.\n---\n\n# Y\n\nRead [y](../../../docs/workflows/y.md).\n');
+  write('.agents/skills/y/agents/openai.yaml', 'interface:\n  display_name: "Y"\n');
+  execFileSync(process.execPath, [join(root, 'scripts', 'gen-cursor-rules.mjs')], { cwd: root });
+  let checked = gate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /rule must link exactly one concern doc \(found 0\): \.claude\/rules\/y\.md/);
+
+  // A row the repository adds names the folder; CRLF line ends read the same.
+  const mapPath = join(root, 'docs', 'map.md');
+  // The row names the home by its file pattern, as a person writes it; the folder of the pattern is the home.
+  writeFileSync(mapPath, `${readFileSync(mapPath, 'utf8')}\r\n| the policy of one workflow | \`docs/workflows/<name>.md\`, linked from its rule | yes | by its rule |\r\n`, 'utf8');
+  checked = gate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('--changed follows a moved folder like --staged does [@invariant sdd-enforce.gates:V22]', () => {
+  const root = installed();
+  mkdirSync(join(root, 'src', 'a'), { recursive: true });
+  writeFileSync(join(root, 'src', 'a', 'x.js'), 'export const x = 1;\n', 'utf8');
+  writeDoc(root, 'docs/a.md', { id: 'fixture.a', code: 'src/a' });
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'feat: add module a']);
+  git(root, ['mv', 'src/a', 'src/b']);
+  writeFileSync(join(root, 'docs', 'a.md'), readFileSync(join(root, 'docs', 'a.md'), 'utf8').replace('code: src/a', 'code: src/b'), 'utf8');
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-q', '-m', 'refactor: move module a to b']);
+  const checked = gate(root, ['--changed', '--base', 'HEAD^']);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('audit warns when the installed standard is newer than the ported checks [@invariant sdd-enforce.gates:V23]', () => {
+  const root = installed();
+  const config = JSON.parse(readFileSync(join(root, '.agent-sdd', 'config.json'), 'utf8'));
+  assert.deepEqual(config.docsStandard, { name: '', version: '0.9.0' });
+
+  const standard = mkdtempSync(join(tmpdir(), 'sdd-enforce-standard-'));
+  fixtures.push(standard);
+  mkdirSync(join(standard, '.claude-plugin'), { recursive: true });
+  const pluginJson = join(standard, '.claude-plugin', 'plugin.json');
+  writeFileSync(pluginJson, '{ "name": "docs-standard", "version": "0.10.0" }\n', 'utf8');
+  let audited = run(['audit', root, '--standard', standard]);
+  assert.equal(audited.status, 0, audited.stderr);
+  assert.match(audited.stdout, /installed standard 0\.10\.0 is newer than the 0\.9\.0 checks/);
+  assert.equal(JSON.parse(run(['audit', root, '--standard', standard, '--json']).stdout).standard.newer, true);
+
+  // Versions compare by number: 0.9.0 is not newer than 0.9.0, and 0.10.0 is newer than 0.9.0.
+  writeFileSync(pluginJson, '{ "name": "docs-standard", "version": "0.9.0" }\n', 'utf8');
+  audited = run(['audit', root, '--standard', standard]);
+  assert.doesNotMatch(audited.stdout, /is newer than/);
+});
+
+test('plan lists the values apply needs from the user [@invariant sdd-enforce.gates:V23]', () => {
+  const root = fixture();
+  let planned = run(['plan', root]);
+  assert.equal(planned.status, 0, planned.stderr);
+  assert.match(planned.stdout, /Needs a value: docsStandardLine, docsStandard\.name/);
+
+  assert.equal(run(['apply', root, '--write']).status, 0);
+  const configPath = join(root, '.agent-sdd', 'config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  config.docsStandardLine = 'Where each doc goes: [the docs standard](https://example.invalid/map.md).';
+  config.docsStandard.name = 'docs-standard';
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  planned = run(['plan', root, '--allow-dirty']);
+  assert.doesNotMatch(planned.stdout, /Needs a value/);
+  assert.equal(JSON.parse(readFileSync(configPath, 'utf8')).docsStandard.name, 'docs-standard');
+});
+
+// The organization words, kept as SHA-256 hashes so that this public file does not name them. A word inside a
+// hyphenated name such as SPEC-FIRST-WORKFLOW.md is part of that name; a host word counts inside one.
+const ORGANIZATION_WORD_HASHES = new Set([
+  '7a4e79b4c3c40e092a844990ecd90e892ab1c79e7a08c4c142846ca9a973e932',
+  '161e1b715ab0517df1a8c50d4bfac3922ceadb29530a86de6a97bb865549b767',
+  'eb202c5787c9604fc7ad2b6811d4cc62dee4591c2125a3109b43aa420c0a46e1',
+  '267d3b81a9dcd937f3b46a17a57fc0ca2133373389336861142673a73fc17bc6',
+]);
+
+function namesAnOrganization(text) {
+  for (const [token] of text.matchAll(/[A-Za-z0-9.-]+/g)) {
+    const word = token.replace(/^[.-]+|[.-]+$/g, '');
+    const exact = [word, ...word.split('.')];
+    const lower = [...exact, ...word.split(/[-.]/)].map((item) => item.toLowerCase());
+    if ([...exact, ...lower].some((item) => ORGANIZATION_WORD_HASHES.has(sha256(item)))) return true;
+  }
+  return false;
+}
+
+test('no template, skill doc or reference names an organization', () => {
+  const roots = ['assets', 'references', 'SKILL.md', 'README.md', 'agents'].map((item) => join(SKILL_ROOT, item));
+  const offenders = [];
+  const visit = (path) => {
+    if (statSync(path).isDirectory()) for (const name of readdirSync(path)) visit(join(path, name));
+    else if (namesAnOrganization(readFileSync(path, 'utf8'))) offenders.push(relative(SKILL_ROOT, path));
+  };
+  for (const path of roots) if (existsSync(path)) visit(path);
+  assert.deepEqual(offenders, []);
+});
+
+test('frontmatter values with quotes and apostrophes read as YAML, and an accepted ADR supersedes nothing [@invariant sdd-enforce.gates:V21]', () => {
+  const root = installed();
+  const write = (path, body) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), body, 'utf8');
+  };
+  write('docs/research/cache.md', "---\ndate: 2026-01-01\nquestion: Why doesn't the cache refresh?\n---\n\n# Cache\n\nThe TTL is fixed.\n\n## Findings\n\n- One TTL.\n\n## Not covered\n\n- Load.\n");
+  write('docs/adr/0001-a.md', '---\nstatus: "superseded by ADR-0002 (the bff\'s cache, 2026-01-01)"\n---\n\n# A\n\nDecided 2026-01-01 (T-1).\n');
+  write('docs/adr/0002-b.md', "---\nstatus: 'accepted (it''s the cache, see ADR-0003)'\n---\n\n# B\n\nDecided 2026-01-02 (T-2). It replaces ADR-0001.\n");
+  // An accepted ADR may name another in its note; that names no superseding ADR.
+  write('docs/adr/0003-c.md', "---\nstatus: 'accepted'\n---\n\n# C\n\nDecided 2026-01-03 (T-3).\n");
+  const checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('in a repo with no workspace the root AGENTS.md owns a runtime file that no doc holds [@invariant sdd-enforce.gates:V18]', () => {
+  const root = installed();
+  writeFileSync(join(root, 'src', 'index.js'), 'export const index = 1;\n', 'utf8');
+  writeFileSync(join(root, 'AGENTS.md'), `${readFileSync(join(root, 'AGENTS.md'), 'utf8')}\n- index exports 1.\n`, 'utf8');
+  git(root, ['add', 'src/index.js', 'AGENTS.md']);
+  const messagePath = join(root, '.git', 'TEST_COMMIT_MSG');
+  writeFileSync(messagePath, 'feat: export 1\n', 'utf8');
+  const checked = gate(root, ['--staged', '--commit-msg', messagePath]);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('check-sdd skips a SPEC.md and an @spec citation under test fixtures, as the audit does [@invariant sdd-enforce.gates:V1]', () => {
+  const root = installed();
+  mkdirSync(join(root, 'evals', 'case'), { recursive: true });
+  writeFileSync(join(root, 'evals', 'case', 'SPEC.md'), '---\nid: case.old\n---\n\nV1: Old.\n', 'utf8');
+  writeFileSync(join(root, 'evals', 'case', 'old.test.js'), "test('old [@spec case.old:V1]', () => {});\n", 'utf8');
+  const checked = gate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
+test('the shipped skills name the code: owner model and hold no $<digit> that Claude Code would replace', () => {
+  const offenders = [];
+  const visit = (path) => {
+    if (statSync(path).isDirectory()) for (const name of readdirSync(path)) visit(join(path, name));
+    else if (path.endsWith('SKILL.md')) {
+      const body = readFileSync(path, 'utf8');
+      if (/covers:/.test(body)) offenders.push(`${relative(SKILL_ROOT, path)}: covers:`);
+      // Claude Code replaces $1, $2 ... in a SKILL.md before the model reads it; a literal one is written \$1.
+      if (/(?<!\\)\$\d/.test(body)) offenders.push(`${relative(SKILL_ROOT, path)}: $<digit>`);
+    }
+  };
+  visit(join(SKILL_ROOT, 'assets'));
+  assert.deepEqual(offenders, []);
+  const commit = readFileSync(join(SKILL_ROOT, 'assets', 'repository', '_claude', 'skills', 'commit-changes', 'SKILL.md'), 'utf8');
+  assert.match(commit, /longest `code:` folder/);
+  assert.match(commit, /docs\/README\.md|`README\.md` index/);
+  // Look-ups stay looked up: the commit linter config and the gates hold their own limits and checks.
+  assert.doesNotMatch(commit, /hard cap 72|at most 100\s+characters|feat fix docs style/);
+  const parityRule = readFileSync(join(SKILL_ROOT, 'assets', 'repository', '_claude', 'rules', 'agent-parity.md'), 'utf8');
+  assert.doesNotMatch(parityRule, /gate rejects|gen-cursor-rules\.mjs` after/);
+});
+
+test('a people-started skill has an imperative name and disable-model-invocation, a model skill a trigger-first description', () => {
+  const root = fixture();
+  const applied = run(['apply', root, '--write', '--profiles', 'core,sdd,helm']);
+  assert.equal(applied.status, 0, applied.stderr);
+  const commit = readFileSync(join(root, '.claude', 'skills', 'commit-changes', 'SKILL.md'), 'utf8');
+  assert.match(commit, /^disable-model-invocation: true$/m);
+  assert.match(commit, /^description: Use when the user asks to commit/m);
+  assert.match(commit, /git diff/);
+  assert.equal(existsSync(join(root, '.claude', 'skills', 'committing-changes')), false);
+  assert.ok(existsSync(join(root, '.agents', 'skills', 'commit-changes', 'SKILL.md')));
+  for (const path of ['.claude/skills/validating-helm-charts/SKILL.md', '.agents/skills/validating-helm-charts/SKILL.md']) {
+    assert.match(readFileSync(join(root, path), 'utf8'), /^description: Use (before|when) /m, path);
+  }
+});
+
 test('docs/map.md holds the rows the tool adds, in a block that merge and uninstall respect [@invariant sdd-enforce.gates:V19]', () => {
   const lean = fixture();
   assert.equal(run(['apply', lean, '--write', '--agents', 'claude']).status, 0);
@@ -955,7 +1294,7 @@ test('a hook config change needs every other enabled hook config, never itself; 
   assert.equal(checked.status, 0, checked.stderr);
 
   git(root, ['reset', '-q', '--hard']);
-  for (const path of ['.claude/hooks/post-edit-reminder.mjs', '.claude/skills/committing-changes/SKILL.md', '.agents/skills/committing-changes/SKILL.md']) {
+  for (const path of ['.claude/hooks/post-edit-reminder.mjs', '.claude/skills/commit-changes/SKILL.md', '.agents/skills/commit-changes/SKILL.md']) {
     writeFileSync(join(root, path), `${readFileSync(join(root, path), 'utf8')}\n<!-- note -->\n`, 'utf8');
     git(root, ['add', path]);
     checked = gate(root, ['--staged', '--commit-msg', message]);
@@ -1178,6 +1517,29 @@ test('a Doc-Impact reason may fold over continuation lines, like a Git trailer [
   assert.match(checked.stderr, /does not name src\/folded\.js/);
 });
 
+test('docs/README.md indexes every doc of record, and the nearest AGENTS.md links the index [@invariant sdd-enforce.gates:V11]', () => {
+  const root = installed();
+  // A repo with no workspace: the root is the one workspace, so its index is docs/README.md.
+  writeFileSync(join(root, 'docs', 'core.md'), '---\nid: fixture.core\ncode: src\n---\n\n# Core\n\n## Goal\n\nThe fixture exists.\n', 'utf8');
+  let checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /docs\/README\.md does not list docs\/core\.md/);
+
+  // A link with an anchor or an encoded character still counts.
+  writeFileSync(join(root, 'docs', 'net-tools.md'), '---\nid: fixture.net\ncode: tools\n---\n\n# Net\n', 'utf8');
+  mkdirSync(join(root, 'tools'), { recursive: true });
+  writeFileSync(join(root, 'tools', 'ping.js'), 'export const ping = 1;\n', 'utf8');
+  writeFileSync(join(root, 'docs', 'README.md'), '# Docs of record\n\n- [core](core.md#v1)\n- [net](net%2Dtools.md)\n', 'utf8');
+  checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.doesNotMatch(checked.stderr, /does not list/);
+  assert.match(checked.stderr, /AGENTS\.md does not link docs\/README\.md/);
+
+  addLink(root, 'AGENTS.md', 'docs/README.md', 'docs of record', '# Fixture agents');
+  checked = docsGate(root);
+  assert.equal(checked.status, 0, checked.stderr);
+});
+
 test('check-docs demands AGENTS.md per workspace, a covering doc per module, its link, and the root pointer [@invariant sdd-enforce.gates:V11]', () => {
   const root = fixture();
   mkdirSync(join(root, 'apps', 'api', 'src', 'modules', 'auth'), { recursive: true });
@@ -1197,12 +1559,17 @@ test('check-docs demands AGENTS.md per workspace, a covering doc per module, its
 
   writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n', 'utf8');
   mkdirSync(join(root, 'apps', 'api', 'docs'), { recursive: true });
-  writeFileSync(join(root, 'apps', 'api', 'docs', 'auth.md'), "---\nid: api.auth\ncovers:\n  - 'apps/api/src/modules/auth/**'\n---\n\n# Auth\n\n## Goal\n\nLog users in.\n", 'utf8');
+  writeFileSync(join(root, 'apps', 'api', 'docs', 'auth.md'), "---\nid: api.auth\ncode: apps/api/src/modules/auth\n---\n\n# Auth\n\n## Goal\n\nLog users in.\n", 'utf8');
   checked = docsGate(root);
   assert.notEqual(checked.status, 0);
-  assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/docs\/auth\.md/);
+  assert.match(checked.stderr, /apps\/api\/docs\/README\.md does not list apps\/api\/docs\/auth\.md/);
 
-  writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n\n- [auth](docs/auth.md): the auth module\n', 'utf8');
+  writeFileSync(join(root, 'apps', 'api', 'docs', 'README.md'), '# api docs\n\n- [auth](auth.md): the auth module\n', 'utf8');
+  checked = docsGate(root);
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /apps\/api\/AGENTS\.md does not link apps\/api\/docs\/README\.md/);
+
+  writeFileSync(join(root, 'apps', 'api', 'AGENTS.md'), '# api\n\n- [docs of record](docs/README.md): one per module\n', 'utf8');
   checked = docsGate(root);
   assert.equal(checked.status, 0, checked.stderr);
   assert.match(checked.stdout, /check-docs: ok/);

@@ -45,31 +45,36 @@ Arguments: `$ARGUMENTS`
 1. Identify target Git root. Read existing `AGENTS.md`, `CLAUDE.md`, agent rules/skills/hooks, docs,
    package scripts, Git hooks, and CI configuration before proposing changes.
 2. Run `audit`; treat its output as evidence, not permission to mutate. Its old-format list (`SPEC.md`,
-   `CLAUDE.md`, non-kebab docs, `@spec` citations) is work for step 6: the gates fail on every item.
+   `CLAUDE.md`, non-kebab docs, `@spec` citations) is work for step 6: the gates fail on every item. When
+   `docsStandard.name` in `.agent-sdd/config.json` names an installed plugin, run `audit <repo> --standard
+   <plugin root>` and report its warning: a newer standard has rules the gates do not check yet.
 3. Select only applicable profiles and agents. Read:
    - [configuration](references/configuration.md) for profiles, commands, waivers, and config-gate mapping;
    - [harness matrix](references/harness-matrix.md) before changing agent-specific files;
    - [migration policy](references/migration-policy.md) when target already has instructions, gates, or an older install.
 4. Run `plan`. Present conflicts, rules listed under "Not written", and material choices before applying when
-   they change repository policy.
+   they change repository policy. For each name under "Needs a value" (`docsStandardLine`,
+   `docsStandard.name`), ask the user, write the answer to `.agent-sdd/config.json`, and plan again.
 5. Prefer a separate Git worktree for application. Run `apply --write` only after scope is established.
    Existing unowned files are conflicts; never add `--merge-agents`, replace hooks, or weaken a gate merely
    to make application succeed without inspecting the target.
 6. Complete target-specific work the generator cannot infer safely:
-   - add the `AGENTS.md` tool lines with `--merge-agents` when required; set `docsStandardLine` in
-     `.agent-sdd/config.json` when the organization has a docs standard line, then apply again;
+   - add the `AGENTS.md` tool lines with `--merge-agents` when required;
    - map actual runtime/config ownership in `.agent-sdd/config.json`: `runtimeRoots`, `moduleRoots` (folders whose
      children are modules that a doc of record covers), `exclude`;
    - move every old-format item `audit` lists, in the same change: a module `SPEC.md` becomes
-     `<workspace>/docs/<module>.md` with `covers:` globs and plain prose, without Tasks, Bugs, or Files tables
-     (open work and bugs go to the issue tracker); `@spec` becomes `@invariant`; `CLAUDE.md` lines move into
-     `AGENTS.md`; docs under `docs/` get kebab-case names. Never invent behavior;
+     `<workspace>/docs/<module>.md` with one `code:` folder, without Tasks, Bugs, or Files tables (open work and
+     bugs go to the issue tracker), and a row in the `README.md` index of its `docs/` folder; `@spec` becomes
+     `@invariant`; `CLAUDE.md` lines move into `AGENTS.md`; docs under `docs/` get kebab-case names. Never
+     invent behavior;
    - wire both gates in the Git hook home (`.husky/` for JS, `.pre-commit-config.yaml` for pre-commit):
      `node scripts/check-docs.mjs && node scripts/check-sdd.mjs` in pre-commit, `--staged --commit-msg` in
      commit-msg, and in CI both static commands and `--changed` (static alone never inspects a commit). Call `node`
-     directly, not through a package-manager wrapper;
+     directly, not through a package-manager wrapper. A commit linter in commit-msg runs before the gate. A
+     commit that CI or a release job writes carries its own `Doc-Impact: none - <reason>` trailer. A CI skip
+     marker such as `[skip ci]` skips the per-change stage only for those commits;
    - regenerate `.cursor/rules/*.mdc` with `node scripts/gen-cursor-rules.mjs` after any `.claude/rules` edit;
-   - fill the workspace filter table in `.claude/skills/committing-changes/SKILL.md`, the surfaces table in
+   - fill the workspace filter table in `.claude/skills/commit-changes/SKILL.md`, the surfaces table in
      `docs/app-config.md`, and the rules index rows for repository-specific rules in `docs/agent-parity.md`;
    - update package-manager aliases only when useful.
 7. Run `verify` (runs both gates), and repository-native tests. Report remaining manual migration debt.
@@ -107,7 +112,7 @@ cannot undo: Git hook lines, CI steps, and package-manager aliases they added fo
 | "My test proves part of V<n>; I note the gap in a comment" | An `@invariant` citation claims the test proves the whole invariant. Partial proof is no evidence. Leave it red and propose an invariant split to the owner. |
 | "User wants a commit, so a red gate blocks nothing" | Commit when asked, but subject and body must say the gate is red and why. Never report green. |
 | "No time to inspect before `--merge-agents`" | Inspection is one file read. Merge without reading the target is a conflict, not a fix. |
-| "I keep the SPEC.md and add a covers line" | A `SPEC.md` fails the gate whatever it holds. Move it to `<workspace>/docs/<module>.md`. |
+| "I keep the SPEC.md and add a code: line" | A `SPEC.md` fails the gate whatever it holds. Move it to `<workspace>/docs/<module>.md`. |
 
 ## Safety invariants
 
