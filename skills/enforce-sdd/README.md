@@ -1,4 +1,4 @@
-# sdd-enforce
+# enforce-sdd
 
 One spec-driven development (SDD) policy for a repository, shared by Claude Code, Codex, and Cursor.
 
@@ -47,7 +47,7 @@ the skill.
 /plugin install maxim-ai@maxim-ai
 ```
 
-The skill shows as `/maxim-ai:sdd-enforce`. Update with `/plugin marketplace update maxim-ai`, then
+The skill shows as `/maxim-ai:enforce-sdd`. Update with `/plugin marketplace update maxim-ai`, then
 `/plugin update maxim-ai@maxim-ai`.
 
 **Codex.** Codex reads the same marketplace file:
@@ -75,16 +75,19 @@ Then install the `maxim-ai` plugin from that marketplace.
 The plugin has no version number. Every install and update takes the latest commit on `main`. The CLI inside
 it has its own version, 1.0.0. The `version` command prints it.
 
-**Upgrading from `cross-agent-sdd`.** The skill was renamed from `cross-agent-sdd` to `sdd-enforce` in 0.6.0,
-and the copy-to-home-folder installer was removed. Remove the old copies with the old script, then install the
+**Upgrading from `sdd-enforce`.** The skill was renamed from `sdd-enforce` to `enforce-sdd` in 1.0.0. Update
+the plugin, and call the skill as `/maxim-ai:enforce-sdd`. The CLI file is now `scripts/enforce-sdd.mjs`.
+
+**Upgrading from `cross-agent-sdd`.** The skill had the name `cross-agent-sdd` before 0.6.0, when the
+copy-to-home-folder installer was also removed. Remove the old copies with the old script, then install the
 plugin as above:
 
 ```bash
 node ~/.claude/skills/cross-agent-sdd/scripts/cross-agent-sdd.mjs uninstall-skill --scope user --agents all --write
 ```
 
-Repositories set up under the old name keep working. `apply` reads the old `cross-agent-sdd` markers in
-`AGENTS.md` and `.gitignore` and replaces them on upgrade. See
+Repositories set up under an old name keep working. `apply` reads the old `cross-agent-sdd` markers in
+`AGENTS.md` and `.gitignore` and the old `sdd-enforce` markers in `docs/map.md`, and replaces them on upgrade. See
 [Upgrading a repository set up by an older version](#upgrading-a-repository-set-up-by-an-older-version).
 
 ## Use it in a repository
@@ -92,7 +95,7 @@ Repositories set up under the old name keep working. `apply` reads the old `cros
 Two ways.
 
 **Through your AI tool.** Open the repository and run the skill with no arguments, for example
-`/maxim-ai:sdd-enforce` in Claude Code. The skill shows a menu with four actions:
+`/maxim-ai:enforce-sdd` in Claude Code. The skill shows a menu with four actions:
 
 | Action | What it does |
 |---|---|
@@ -101,8 +104,8 @@ Two ways.
 | Verify | Checks that the installed files are intact and that both gates are green. Changes nothing. |
 | Remove | Lists what uninstall would delete, and deletes only after your explicit yes. |
 
-To skip the menu, name the action: `/maxim-ai:sdd-enforce audit` or `/maxim-ai:sdd-enforce apply`. You can also
-ask in your own words, for example "Set up sdd-enforce in this repo". During Apply the skill also does the parts
+To skip the menu, name the action: `/maxim-ai:enforce-sdd audit` or `/maxim-ai:enforce-sdd apply`. You can also
+ask in your own words, for example "Set up enforce-sdd in this repo". During Apply the skill also does the parts
 that a script cannot guess. It sets the folders that hold application code, moves old-format docs, and tells you
 how to wire Git hooks and CI.
 
@@ -113,26 +116,26 @@ holds `SKILL.md`. In Claude Code it is under `~/.claude/plugins/cache/maxim-ai/m
 you the exact path. On Windows Command Prompt, replace `~` with `%USERPROFILE%`.
 
 ```bash
-node <skill>/scripts/sdd-enforce.mjs audit .
+node <skill>/scripts/enforce-sdd.mjs audit .
 ```
 
 Reports what is already in the repository and lists the old-format items that you must move by hand. Changes
 nothing.
 
 ```bash
-node <skill>/scripts/sdd-enforce.mjs plan .
+node <skill>/scripts/enforce-sdd.mjs plan .
 ```
 
 Lists every file that `apply` would create, update, keep, merge, delete, or refuse. Changes nothing.
 
 ```bash
-node <skill>/scripts/sdd-enforce.mjs apply . --write
+node <skill>/scripts/enforce-sdd.mjs apply . --write
 ```
 
 Writes the files. Without `--write` it prints the plan and writes nothing. At the end it prints the next steps.
 
 ```bash
-node <skill>/scripts/sdd-enforce.mjs verify .
+node <skill>/scripts/enforce-sdd.mjs verify .
 ```
 
 Checks that every generated file is intact and runs both gates.
@@ -149,7 +152,7 @@ With the default profiles (`core,sdd`) and all three tools:
 | `AGENTS.md` | Standing repository policy. The tool owns one line below the first heading: `Before you edit code, read every doc of record that covers it: [doc of record](docs/doc-of-record.md).` When `docsStandardLine` is set, the tool also owns that line, above the pointer. The tool creates the file if it is missing. An existing file without the lines gets them only when you pass `--merge-agents`. The rest of the file is yours. | every tool, people |
 | `docs/doc-of-record.md` | Concern doc: the shape of a doc of record, the evidence rules, and the rules for reading and updating a doc. | every tool, people |
 | `docs/agent-parity.md` | Concern doc: the partner rules for Claude Code, Codex, and Cursor files. It also holds the rules index (scope, concern doc, and trigger of each rule), rendered from the shipped rules. Add rows for your own rules. | every tool, people |
-| `docs/map.md` | The docs map: which kind of doc goes where. The tool writes its rows between `<!-- sdd-enforce:start -->` and `<!-- sdd-enforce:end -->`. It creates the file, or adds the block to your file. Your rows outside the block stay. | every tool, people |
+| `docs/map.md` | The docs map: which kind of doc goes where. The tool writes its rows between `<!-- enforce-sdd:start -->` and `<!-- enforce-sdd:end -->`. It creates the file, or adds the block to your file. Your rows outside the block stay. | every tool, people |
 | `.claude/rules/doc-of-record.md`, `.claude/rules/agent-parity.md` | Claude Code path rules. Each rule holds three to six short imperatives and one link to its concern doc. The `doc-of-record` rule loads for files under your `runtimeRoots`. | Claude Code |
 | `.cursor/rules/*.mdc` | The same rules for Cursor, generated from `.claude/rules` by `scripts/gen-cursor-rules.mjs`. Never edit them by hand. | Cursor |
 | `.agents/skills/<name>/` | Codex and Cursor adapters, each with `agents/openai.yaml` display metadata. The adapter of a rule links the same concern doc as the rule. The twin of a skill links the Claude skill. | Codex, Cursor |
@@ -216,7 +219,7 @@ the diff, wire the gates (see [Gate reference](#gate-reference)), then commit it
 ## CLI reference
 
 ```text
-node <skill>/scripts/sdd-enforce.mjs <command> [arguments]
+node <skill>/scripts/enforce-sdd.mjs <command> [arguments]
 ```
 
 `<skill>` is the folder that the plugin installed. See [Use it in a repository](#use-it-in-a-repository).
@@ -461,7 +464,7 @@ The `AGENTS.md` block that 0.4.0 managed becomes the tool lines (`update`). A bl
 One command, the same for an edit that you committed and for a file that existed before install:
 
 ```bash
-node <skill>/scripts/sdd-enforce.mjs apply . --write --replace scripts/check-sdd.mjs
+node <skill>/scripts/enforce-sdd.mjs apply . --write --replace scripts/check-sdd.mjs
 ```
 
 The file gets the tool version and becomes tool-owned. Later upgrades update it and `uninstall` deletes it.
@@ -476,13 +479,13 @@ while `scripts/check-sdd.mjs` is missing.
 From a repository:
 
 ```bash
-node <skill>/scripts/sdd-enforce.mjs uninstall .
+node <skill>/scripts/enforce-sdd.mjs uninstall .
 ```
 
 This is a dry run. It lists what would be deleted, edited, or kept, and changes nothing.
 
 ```bash
-node <skill>/scripts/sdd-enforce.mjs uninstall . --write
+node <skill>/scripts/enforce-sdd.mjs uninstall . --write
 ```
 
 It asks you to type `uninstall`, then removes the files.
@@ -494,7 +497,7 @@ What happens:
 | Files that the tool created (concern docs, rules, adapters, skills, gates, the hook script, generated Cursor rules) | Deleted, if unchanged since install. Edited copies are kept and reported. Add `--force` to delete them too. |
 | Files that had the same content before install | Kept. The tool did not create them, so it does not delete them. |
 | `AGENTS.md` | Only the tool lines are removed: the pointer, the docs standard line, and an old import line. Your text stays. A file that the tool created and that holds nothing else is deleted. |
-| `docs/map.md` | Only the `sdd-enforce` block is removed. A file that the tool created and that holds only the block and its heading is deleted. |
+| `docs/map.md` | Only the `enforce-sdd` block is removed. A file that the tool created and that holds only the block and its heading is deleted. |
 | `.claude/settings.json`, `.codex/hooks.json`, `.cursor/hooks.json` | Only the reminder hook entry is removed. Your other hooks and settings stay. A file that the tool created and that holds nothing else is deleted. |
 | `CLAUDE.md` and `.gitignore` from an install before 1.0.0 that was never upgraded | Only the old `@AGENTS.md` line or the `changes-log.md` block is removed. Your text stays. |
 | `.agent-sdd/config.json`, `.agent-sdd/waivers.json`, `.agent-toolchain.json` | Deleted. Git history keeps them. |

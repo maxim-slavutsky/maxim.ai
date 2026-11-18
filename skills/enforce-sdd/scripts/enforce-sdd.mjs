@@ -21,7 +21,7 @@ import { matchesGlob, skipRules } from '../assets/repository/scripts/sdd-lib.mjs
 const VERSION = '1.0.0';
 // The version of the docs standard whose script checks scripts/docs-standard.mjs ports.
 const STANDARD_VERSION = '0.10.0';
-const SKILL_NAME = 'sdd-enforce';
+const SKILL_NAME = 'enforce-sdd';
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSET_ROOT = join(SKILL_ROOT, 'assets', 'repository');
 
@@ -46,8 +46,11 @@ const AGENTS_DEFAULT_HEADER = '# Repository agent instructions';
 const GITIGNORE_START = '# cross-agent-sdd:start';
 const GITIGNORE_END = '# cross-agent-sdd:end';
 const MAP = 'docs/map.md';
-const MAP_START = '<!-- sdd-enforce:start -->';
-const MAP_END = '<!-- sdd-enforce:end -->';
+const MAP_START = '<!-- enforce-sdd:start -->';
+const MAP_END = '<!-- enforce-sdd:end -->';
+// The skill was named sdd-enforce up to 1.0.0. Apply rewrites a block with these markers, uninstall removes it.
+const FORMER_MAP_START = '<!-- sdd-enforce:start -->';
+const FORMER_MAP_END = '<!-- sdd-enforce:end -->';
 const MAP_HEADER = '# Docs map: rows this repository adds\n\nEach row adds a home that the shared docs map has no row for.';
 const HOOK_SCRIPT = '.claude/hooks/post-edit-reminder.mjs';
 const LEGACY_HOOK_SCRIPT = 'scripts/hooks/post-edit-reminder.mjs';
@@ -87,10 +90,10 @@ const entries = [
 ].map(([profile, path]) => ({ profile, path }));
 
 function help() {
-  console.log(`sdd-enforce ${VERSION}
+  console.log(`enforce-sdd ${VERSION}
 One spec-driven-development policy for Claude Code, Codex, and Cursor, installed into a Git repository.
 
-Usage: node <path-to-skill>/scripts/sdd-enforce.mjs <command> [arguments]
+Usage: node <path-to-skill>/scripts/enforce-sdd.mjs <command> [arguments]
 
 Commands
   audit <repo> [--json]           Look at the repository and report what is already there. Changes nothing.
@@ -222,8 +225,8 @@ function safePath(root, path) {
 
 function atomicWrite(path, content) {
   mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.sdd-enforce-${process.pid}-${randomUUID()}.tmp`;
-  const backup = `${path}.sdd-enforce-${process.pid}-${randomUUID()}.bak`;
+  const temporary = `${path}.enforce-sdd-${process.pid}-${randomUUID()}.tmp`;
+  const backup = `${path}.enforce-sdd-${process.pid}-${randomUUID()}.bak`;
   writeFileSync(temporary, content, 'utf8');
   if (!existsSync(path)) {
     renameSync(temporary, path);
@@ -689,7 +692,7 @@ function mapContent(root, agents) {
   const path = join(root, MAP);
   if (!existsSync(path)) return { action: 'create', content: `${MAP_HEADER}\n\n${block}\n` };
   const current = read(path);
-  const replaced = replaceBlock(current, block, MAP_START, MAP_END);
+  const replaced = replaceBlock(current, block, MAP_START, MAP_END) ?? replaceBlock(current, block, FORMER_MAP_START, FORMER_MAP_END);
   if (replaced !== null) return { action: replaced === current ? 'preserve' : 'update', content: replaced };
   return { action: 'merge', content: `${current.trimEnd()}\n\n${block}\n` };
 }
@@ -907,7 +910,7 @@ function printAudit(result) {
   if (result.standard.newer) {
     console.log(
       `\nWarning: the installed standard ${result.standard.installed} is newer than the ${result.standard.ported} checks these gates port. ` +
-        'Its new rules are not gated yet: run the docs audit, and update sdd-enforce when a newer version exists.',
+        'Its new rules are not gated yet: run the docs audit, and update enforce-sdd when a newer version exists.',
     );
   }
   if (result.legacy.length) {
@@ -1063,7 +1066,7 @@ function trimmedOrEmpty(body) {
 function uninstallPlan(root, force) {
   const manifest = readManifest(root);
   if (!manifest) {
-    throw new Error(`${MANIFEST} is missing, so there is nothing to uninstall. This repository was never set up by sdd-enforce, or the file was deleted; if files remain, remove them by hand.`);
+    throw new Error(`${MANIFEST} is missing, so there is nothing to uninstall. This repository was never set up by enforce-sdd, or the file was deleted; if files remain, remove them by hand.`);
   }
   const actions = [];
   const push = (path, action, extra = {}) => actions.push({ path, action, ...extra });
@@ -1111,14 +1114,14 @@ function uninstallPlan(root, force) {
       continue;
     }
     if (path === MAP) {
-      const block = managedBlock(current, MAP_START, MAP_END);
+      const block = managedBlock(current, MAP_START, MAP_END) ?? managedBlock(current, FORMER_MAP_START, FORMER_MAP_END);
       if (!block) {
-        push(path, 'keep', { reason: 'the sdd-enforce rows are no longer there; nothing to remove' });
+        push(path, 'keep', { reason: 'the enforce-sdd rows are no longer there; nothing to remove' });
         continue;
       }
       const rest = trimmedOrEmpty(current.replace(block, ''));
-      if (mode === 'created' && (!rest || rest.trim() === MAP_HEADER)) push(path, 'delete', { reason: 'created by install, only the sdd-enforce rows inside' });
-      else push(path, 'edit', { content: rest, reason: 'remove the sdd-enforce rows, keep the rest' });
+      if (mode === 'created' && (!rest || rest.trim() === MAP_HEADER)) push(path, 'delete', { reason: 'created by install, only the enforce-sdd rows inside' });
+      else push(path, 'edit', { content: rest, reason: 'remove the enforce-sdd rows, keep the rest' });
       continue;
     }
     if (path === '.gitignore') {
@@ -1167,7 +1170,7 @@ function printUninstall(value) {
   const counts = {};
   for (const action of value.actions) counts[action.action] = (counts[action.action] ?? 0) + 1;
   console.log(
-    `\nAction words: delete = file removed; edit = only the sdd-enforce part removed, your text stays; ` +
+    `\nAction words: delete = file removed; edit = only the enforce-sdd part removed, your text stays; ` +
       'keep = left untouched for the reason shown; skip = already absent.',
   );
   console.log(`Summary: ${Object.entries(counts).map(([name, count]) => `${count} ${name}`).join(', ')}.`);
@@ -1203,12 +1206,12 @@ function verify(root) {
   const manifest = readManifest(root);
   const errors = [];
   if (!manifest) {
-    return { ok: false, errors: [`${MANIFEST} is missing. This repository was never set up by sdd-enforce (or the file was deleted). Run "apply <repo> --write" first.`] };
+    return { ok: false, errors: [`${MANIFEST} is missing. This repository was never set up by enforce-sdd (or the file was deleted). Run "apply <repo> --write" first.`] };
   }
   for (const [path, record] of Object.entries(manifest.managedFiles ?? {})) {
     const absolute = join(root, path);
     if (!existsSync(absolute)) {
-      errors.push(`managed file is missing: ${path}. It was created by sdd-enforce; run "apply <repo> --write" to restore it.`);
+      errors.push(`managed file is missing: ${path}. It was created by enforce-sdd; run "apply <repo> --write" to restore it.`);
       continue;
     }
     // Preserved files existed before install with the tool's content; they are the repository's, not ours.
@@ -1283,7 +1286,7 @@ async function main() {
       return;
     }
     applyUninstall(value);
-    console.log(`\nUninstalled sdd-enforce from ${root}. Review the diff with "git status" and commit it.
+    console.log(`\nUninstalled enforce-sdd from ${root}. Review the diff with "git status" and commit it.
 Things this tool cannot undo for you:
   - lines you added to Git hooks (pre-commit, commit-msg) or CI that run scripts/check-docs.mjs or
     scripts/check-sdd.mjs: remove them;
@@ -1311,7 +1314,7 @@ Things this tool cannot undo for you:
       return;
     }
     applyPlan(value);
-    console.log(`\nApplied sdd-enforce ${VERSION}. Next steps:
+    console.log(`\nApplied enforce-sdd ${VERSION}. Next steps:
   1. Open .agent-sdd/config.json: make sure "runtimeRoots" lists the folders that hold application code,
      "moduleRoots" lists the folders whose children are modules that a doc of record covers (for example
      "apps/*/src/modules"), and archived docs (old plans, samples) are in "exclude". Set "docsStandardLine"
@@ -1338,8 +1341,8 @@ To remove everything later: "uninstall <repo> --write".`);
       for (const error of result.errors) console.error(`x ${error}`);
       console.log(
         result.ok
-          ? 'sdd-enforce verify: ok (generated files intact, gate green)'
-          : `sdd-enforce verify: failed (${result.errors.length} problem(s) listed above)`,
+          ? 'enforce-sdd verify: ok (generated files intact, gate green)'
+          : `enforce-sdd verify: failed (${result.errors.length} problem(s) listed above)`,
       );
     }
     if (!result.ok) process.exitCode = 1;
@@ -1351,6 +1354,6 @@ To remove everything later: "uninstall <repo> --write".`);
 try {
   await main();
 } catch (error) {
-  console.error(`sdd-enforce: ${error.message}`);
+  console.error(`enforce-sdd: ${error.message}`);
   process.exit(1);
 }

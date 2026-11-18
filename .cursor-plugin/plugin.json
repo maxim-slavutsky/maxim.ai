@@ -1,6 +1,6 @@
 {
   "name": "maxim-ai",
-  "description": "Maxim's AI skills: sdd-enforce bootstraps one spec-driven-development policy shared by Claude Code, Codex, and Cursor.",
+  "description": "Maxim's AI skills: enforce-sdd bootstraps one spec-driven-development policy shared by Claude Code, Codex, and Cursor.",
   "author": {
     "name": "Maxim Slavutsky",
     "url": "https://github.com/maxim-slavutsky"

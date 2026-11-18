@@ -1,10 +1,10 @@
 ---
-name: sdd-enforce
-description: Use when a repository needs one shared spec-driven development policy for Claude Code, Codex, and Cursor at once - missing or drifted agent instructions, rules/skills/hooks that no longer match across harnesses, absent docs-of-record or config gates, or an older sdd-enforce install to upgrade. Not for ordinary feature work inside an already governed repository.
+name: enforce-sdd
+description: Use when a repository needs one shared spec-driven development policy for Claude Code, Codex, and Cursor at once - missing or drifted agent instructions, rules/skills/hooks that no longer match across harnesses, absent docs-of-record or config gates, or an older enforce-sdd install to upgrade. Not for ordinary feature work inside an already governed repository.
 argument-hint: "[audit | apply | verify | remove] [repo path]"
 ---
 
-# SDD enforce: cross-agent SDD bootstrap
+# Enforce SDD: cross-agent SDD bootstrap
 
 Create one tool-neutral SDD policy with thin Claude Code, Codex, and Cursor adapters, in a layout that matches a
 docs standard: `AGENTS.md` and never `CLAUDE.md`, kebab-case concern docs under `docs/`, docs of record instead of
@@ -20,7 +20,7 @@ Arguments: `$ARGUMENTS`
      repository path. Without it, the target is the Git root of the current folder.
    - Nothing (the line is empty or still shows the literal placeholder), or any other word: show the menu and
      wait for the answer. In Claude Code, ask one single-select question with the question tool, "What should
-     sdd-enforce do in this repository?", with these options in this order:
+     enforce-sdd do in this repository?", with these options in this order:
 
      | Option | Description |
      |---|---|
@@ -34,7 +34,7 @@ Arguments: `$ARGUMENTS`
    Done when you know the action and the target repository.
 2. **Run the action.**
    - **Audit**: run steps 1 and 2 of the required flow, then run `plan` (read-only). Report what exists, whether
-     an older sdd-enforce version is installed, the suggested profiles, each old-format item with its action, and
+     an older enforce-sdd version is installed, the suggested profiles, each old-format item with its action, and
      each `plan` conflict. End by offering Apply. Done when the report is in the reply and nothing was written.
    - **Apply SDD**: run the required flow below. On a repository with an older install, apply is the upgrade.
    - **Verify**: run `verify <repo>`. Report each failing line with its fix. Done when the report is in the reply.
@@ -98,15 +98,15 @@ Arguments: `$ARGUMENTS`
 
 ## CLI
 
-Resolve `scripts/sdd-enforce.mjs` relative to this `SKILL.md`; quote its absolute path when the skill
+Resolve `scripts/enforce-sdd.mjs` relative to this `SKILL.md`; quote its absolute path when the skill
 path contains spaces.
 
 ```text
-node <skill>/scripts/sdd-enforce.mjs audit <repo> [--json]
-node <skill>/scripts/sdd-enforce.mjs plan <repo> [--profiles core,sdd,config,helm] [--agents all]
-node <skill>/scripts/sdd-enforce.mjs apply <repo> --write [--merge-agents] [--replace <path,...>] [--allow-dirty]
-node <skill>/scripts/sdd-enforce.mjs verify <repo>
-node <skill>/scripts/sdd-enforce.mjs uninstall <repo> [--write] [--force] [--yes]
+node <skill>/scripts/enforce-sdd.mjs audit <repo> [--json]
+node <skill>/scripts/enforce-sdd.mjs plan <repo> [--profiles core,sdd,config,helm] [--agents all]
+node <skill>/scripts/enforce-sdd.mjs apply <repo> --write [--merge-agents] [--replace <path,...>] [--allow-dirty]
+node <skill>/scripts/enforce-sdd.mjs verify <repo>
+node <skill>/scripts/enforce-sdd.mjs uninstall <repo> [--write] [--force] [--yes]
 ```
 
 Defaults: profiles `core,sdd`; agents `claude,codex,cursor`; dry-run for every mutating command.

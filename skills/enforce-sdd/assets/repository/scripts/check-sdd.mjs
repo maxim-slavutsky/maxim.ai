@@ -44,7 +44,7 @@ function json(path) {
 
 const config = existsSync(CONFIG_PATH) ? json(CONFIG_PATH) : null;
 if (!config) {
-  fail('missing or invalid .agent-sdd/config.json. This file tells the gate which folders hold application code; re-run the sdd-enforce "apply --write" command to recreate it.');
+  fail('missing or invalid .agent-sdd/config.json. This file tells the gate which folders hold application code; re-run the enforce-sdd "apply --write" command to recreate it.');
 }
 
 const HOOK_CONFIG_PATHS = {
@@ -340,14 +340,14 @@ function checkAgents() {
   for (const agent of agents) {
     const path = hookConfigs[agent];
     if (!path || !existsSync(join(ROOT, path))) {
-      fail(`missing ${agent} hook config: ${path ?? agent}. Re-run the sdd-enforce "apply --write" command, or remove "${agent}" from "agents" in .agent-sdd/config.json if that tool is not used here.`);
+      fail(`missing ${agent} hook config: ${path ?? agent}. Re-run the enforce-sdd "apply --write" command, or remove "${agent}" from "agents" in .agent-sdd/config.json if that tool is not used here.`);
       continue;
     }
     const data = json(join(ROOT, path));
     if (!data) continue;
     const commands = hookCommands(data);
     if (!commands.length && hookCommands(data, [], LEGACY_HOOK_SCRIPT).length) {
-      fail(`${path} still runs ${LEGACY_HOOK_SCRIPT}, the path before 1.0.0. Re-run the sdd-enforce "apply --write" command; it moves the hook to ${HOOK_SCRIPT}.`);
+      fail(`${path} still runs ${LEGACY_HOOK_SCRIPT}, the path before 1.0.0. Re-run the enforce-sdd "apply --write" command; it moves the hook to ${HOOK_SCRIPT}.`);
       continue;
     }
     if (!commands.length) {

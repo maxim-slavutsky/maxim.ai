@@ -1,6 +1,6 @@
 ---
-id: sdd-enforce.gates
-code: skills/sdd-enforce
+id: enforce-sdd.gates
+code: skills/enforce-sdd
 critical:
   - V1
   - V2
@@ -31,7 +31,7 @@ critical:
   - V27
 ---
 
-# sdd-enforce installer and gates
+# enforce-sdd installer and gates
 
 ## Goal
 
@@ -54,7 +54,7 @@ the docs, the evidence and the agent files true, and accept each of their valid 
 ## Interfaces
 
 ```text
-cmd: node skills/sdd-enforce/scripts/sdd-enforce.mjs audit|plan|apply|verify|uninstall <repo> [flags]
+cmd: node skills/enforce-sdd/scripts/enforce-sdd.mjs audit|plan|apply|verify|uninstall <repo> [flags]
 cmd: node scripts/check-docs.mjs
 cmd: node scripts/check-sdd.mjs [--staged --commit-msg <path> | --changed [--base <ref>]]
 cmd: node scripts/gen-cursor-rules.mjs [--check]
@@ -106,7 +106,8 @@ other enabled config in the same commit, or an `Agent-Parity` trailer. The chang
 The hook script under `.claude/hooks/`, a Claude skill and its `.agents` twin each need no partner.
 
 V9: The gates never read `.claude/skills/<n>/`, `.agents/skills/<n>/` or `.cursor/skills/<n>/` for `n` in
-`sdd-enforce` and `cross-agent-sdd`. A copy of the skill inside a repository is tooling, not policy.
+`enforce-sdd` and the former names `sdd-enforce` and `cross-agent-sdd`. A copy of the skill inside a repository
+is tooling, not policy.
 
 V10: The reason of `Doc-Impact: none - <reason>`, `Spec-Impact: none - <reason>` or `Agent-Parity: none - <reason>`
 folds like a Git trailer. Each following line that starts with whitespace continues it and joins with a space. A
@@ -154,10 +155,11 @@ the nearest `AGENTS.md` above the file, ending at the root `AGENTS.md`. A parent
 changes the file and not its owner needs a `Doc-Impact: none -` reason of 8 words or more.
 The reason names each such file and is not generic. `Spec-Impact:` is accepted as the same trailer.
 
-V19: Apply writes the tool's map rows between `<!-- sdd-enforce:start -->` and `<!-- sdd-enforce:end -->` in
+V19: Apply writes the tool's map rows between `<!-- enforce-sdd:start -->` and `<!-- enforce-sdd:end -->` in
 `docs/map.md`. The rows follow the enabled agents. It creates the file, or merges the block into an existing file
 and keeps the rows outside it. Uninstall removes the block, and deletes the file only when install created it and
-only the block and the heading remain.
+only the block and the heading remain. A block between the `sdd-enforce` markers of the former name is the same
+block: apply rewrites it with the new markers, and uninstall removes it.
 
 V20: `scripts/check-docs.mjs` fails on each hit of a migration detect check of the docs standard that a script can
 decide: `context-md-to-glossary-md`, `plans-in-jira-not-files`, `spec-of-record-to-doc-of-record`,

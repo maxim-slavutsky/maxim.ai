@@ -7,11 +7,11 @@ import { join, relative } from 'node:path';
 
 export const normalize = (value) => value.replace(/^﻿/, '').replaceAll('\r\n', '\n');
 
-// A copy of the sdd-enforce skill itself may be kept inside the repository (.claude/.agents/.cursor skills).
+// A copy of the enforce-sdd skill itself may be kept inside the repository (.claude/.agents/.cursor skills).
 // Its bundled templates and SKILL.md are tooling, not repository policy, so the gates never read them.
-// cross-agent-sdd is the skill's former name; copies installed under it are skipped too.
+// sdd-enforce and cross-agent-sdd are the skill's former names; copies installed under them are skipped too.
 export const TOOL_SKILL_DIRS = ['.claude', '.agents', '.cursor'].flatMap((root) =>
-  ['sdd-enforce', 'cross-agent-sdd'].map((name) => `${root}/skills/${name}`),
+  ['enforce-sdd', 'sdd-enforce', 'cross-agent-sdd'].map((name) => `${root}/skills/${name}`),
 );
 // Claude Code keeps its worktrees inside the checkout (.claude/worktrees/<name>), each one a full copy of the
 // repository. Reading them reports every doc twice and blocks every commit while any worktree exists. Skipped by

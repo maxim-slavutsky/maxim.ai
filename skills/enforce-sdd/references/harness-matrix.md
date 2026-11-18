@@ -8,7 +8,7 @@ Read before creating or editing agent-specific files.
 | Procedure (skill) | `.claude/skills/<name>/SKILL.md` (holds the steps) | native | `.agents/skills/<name>/SKILL.md` twin that links it + `agents/openai.yaml` | loads `.agents/skills` |
 | Path-scoped rule | concern doc `docs/<concern>.md` | `.claude/rules/<name>.md` (tool-neutral body, source of the Cursor copy) | `.agents/skills/<name>` adapter that links the same concern doc | generated `.cursor/rules/<name>.mdc` |
 | Rule index | Rules index table in `docs/agent-parity.md` | same file | same file | same file |
-| Docs map rows | `sdd-enforce` block in `docs/map.md` | same file | same file | same file |
+| Docs map rows | `enforce-sdd` block in `docs/map.md` | same file | same file | same file |
 | Post-edit reminder | `.claude/hooks/post-edit-reminder.mjs` | `.claude/settings.json` | `.codex/hooks.json` | `.cursor/hooks.json` (`--cursor`) |
 | Enforcement | `scripts/check-docs.mjs` + `scripts/check-sdd.mjs` (shared `scripts/sdd-lib.mjs`) | Git hooks (`.husky/` or `.pre-commit-config.yaml`) + CI | same | same |
 
@@ -25,8 +25,8 @@ Read before creating or editing agent-specific files.
 - Every `.agents/skills/<name>` carries `agents/openai.yaml` (gate checks when Codex is enabled).
 - One hook script; all enabled harness configs invoke it. Only the Cursor command passes `--cursor`. The
   three configs move together (a changed config is never its own partner); the script may change alone.
-- The gates skip `.claude/skills/sdd-enforce`, `.agents/skills/sdd-enforce`, and `.cursor/skills/sdd-enforce`
-  (this skill installed in-repo, also under the former name `cross-agent-sdd`), and `.claude/worktrees` (Claude
+- The gates skip `.claude/skills/enforce-sdd`, `.agents/skills/enforce-sdd`, and `.cursor/skills/enforce-sdd`
+  (this skill installed in-repo, also under the former names `sdd-enforce` and `cross-agent-sdd`), and `.claude/worktrees` (Claude
   Code worktrees, full repository copies). Other tool skills installed in-repo go into `exclude` in
   `.agent-sdd/config.json`.
 - Adding, removing, or renaming a rule updates the Rules index in `docs/agent-parity.md` in the same change. Keep

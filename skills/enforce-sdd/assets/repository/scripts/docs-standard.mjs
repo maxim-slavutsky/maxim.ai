@@ -85,7 +85,7 @@ export function standardProblems({ files, read, isIgnored = () => false }) {
   const inScope = files.filter((path) => !FIXTURE_DIR.test(path));
 
   if (!inScope.includes('AGENTS.md')) {
-    fail('missing AGENTS.md at the repository root. Create it with the gotchas every session needs; the sdd-enforce "apply --write" command adds its own lines.');
+    fail('missing AGENTS.md at the repository root. Create it with the gotchas every session needs; the enforce-sdd "apply --write" command adds its own lines.');
   }
   if (!inScope.includes('README.md')) {
     fail('missing README.md at the repository root. Say what the code is, then how to set it up and run it.');

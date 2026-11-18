@@ -7,9 +7,9 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 
-const CLI = resolve(dirname(fileURLToPath(import.meta.url)), 'sdd-enforce.mjs');
+const CLI = resolve(dirname(fileURLToPath(import.meta.url)), 'enforce-sdd.mjs');
 const SKILL_ROOT = resolve(dirname(CLI), '..');
-const SKILL_NAME = 'sdd-enforce';
+const SKILL_NAME = 'enforce-sdd';
 const fixtures = [];
 
 after(() => {
@@ -22,13 +22,13 @@ function git(root, args) {
 
 /** A repository with one runtime file, so the doc-of-record rule has a folder to govern. */
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-enforce-test-'));
+  const root = mkdtempSync(join(tmpdir(), 'enforce-sdd-test-'));
   fixtures.push(root);
   git(root, ['init', '--initial-branch=main']);
-  git(root, ['config', 'user.name', 'SDD Enforce Test']);
-  git(root, ['config', 'user.email', 'sdd-enforce@example.invalid']);
+  git(root, ['config', 'user.name', 'Enforce SDD Test']);
+  git(root, ['config', 'user.email', 'enforce-sdd@example.invalid']);
   git(root, ['config', 'core.autocrlf', 'false']);
-  writeFileSync(join(root, 'README.md'), '# Fixture\n\nA repository for the sdd-enforce tests.\n', 'utf8');
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\nA repository for the enforce-sdd tests.\n', 'utf8');
   mkdirSync(join(root, 'src'), { recursive: true });
   writeFileSync(join(root, 'src', 'index.js'), 'export const index = 0;\n', 'utf8');
   git(root, ['add', '.']);
@@ -41,7 +41,7 @@ function installed() {
   const applied = run(['apply', root, '--write']);
   assert.equal(applied.status, 0, applied.stderr);
   git(root, ['add', '.']);
-  git(root, ['commit', '-m', 'chore: install sdd-enforce']);
+  git(root, ['commit', '-m', 'chore: install enforce-sdd']);
   return root;
 }
 
@@ -165,7 +165,7 @@ const UPGRADED_06_FILES = {
   '.agents/skills/commit-changes/agents/openai.yaml': 'interface:\n  display_name: "Commit changes"\n',
 };
 
-/** A repository as sdd-enforce 0.6.0 left it: workflow docs, a CLAUDE.md import, a .gitignore block, old hook path. */
+/** A repository as enforce-sdd 0.6.0 left it: workflow docs, a CLAUDE.md import, a .gitignore block, old hook path. */
 function legacy06Installed({ editCommitWorkflow = false } = {}) {
   const root = installed();
   const manifestPath = join(root, '.agent-toolchain.json');
@@ -191,7 +191,7 @@ function legacy06Installed({ editCommitWorkflow = false } = {}) {
   delete manifest.managedFiles['docs/map.md'];
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   git(root, ['add', '-A']);
-  git(root, ['commit', '-q', '-m', 'chore: state left by sdd-enforce 0.6.0']);
+  git(root, ['commit', '-q', '-m', 'chore: state left by enforce-sdd 0.6.0']);
   return root;
 }
 
@@ -241,7 +241,7 @@ test('audit counts tracked and untracked files but never gitignored ones', () =>
   assert.deepEqual(report.suggestedProfiles, ['core', 'sdd', 'helm']);
 });
 
-test('audit lists every old-format item an agent moves by hand [@invariant sdd-enforce.gates:V15]', () => {
+test('audit lists every old-format item an agent moves by hand [@invariant enforce-sdd.gates:V15]', () => {
   const root = fixture();
   writeFileSync(join(root, 'src', 'SPEC.md'), '---\nid: fixture.core\n---\n\n## §G\n\nfixture\n', 'utf8');
   writeFileSync(join(root, 'CLAUDE.md'), '@AGENTS.md\n', 'utf8');
@@ -303,7 +303,7 @@ test('apply is idempotent, follows rule-vs-skill ownership, and verifies', () =>
   );
 });
 
-test('a rule keeps only the globs that match a file, and a rule with none is not written [@invariant sdd-enforce.gates:V17]', () => {
+test('a rule keeps only the globs that match a file, and a rule with none is not written [@invariant enforce-sdd.gates:V17]', () => {
   const root = fixture();
   git(root, ['rm', '-q', 'src/index.js']);
   git(root, ['commit', '-q', '-m', 'chore: no code yet']);
@@ -321,7 +321,7 @@ test('a rule keeps only the globs that match a file, and a rule with none is not
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('gate rejects stale Cursor mirror after Claude rule edit [@invariant sdd-enforce.gates:V2]', () => {
+test('gate rejects stale Cursor mirror after Claude rule edit [@invariant enforce-sdd.gates:V2]', () => {
   const root = installed();
   const rule = join(root, '.claude', 'rules', 'doc-of-record.md');
   writeFileSync(rule, `${readFileSync(rule, 'utf8')}\n- **Additional shared policy line**, for the test.\n`, 'utf8');
@@ -342,7 +342,7 @@ test('gate rejects stale Cursor mirror after Claude rule edit [@invariant sdd-en
   assert.match(checked.stderr, /\.cursor\/rules\/stray\.mdc has no source rule/);
 });
 
-test('a doc of record needs id and one live code: folder inside its workspace [@invariant sdd-enforce.gates:V1]', () => {
+test('a doc of record needs id and one live code: folder inside its workspace [@invariant enforce-sdd.gates:V1]', () => {
   const root = installed();
   writeDoc(root, 'docs/core.md', { id: 'fixture.core', body: '## Invariants\n\nV1: Fixture remains stable.\n\n## Tasks\n\nT1|.|later|V1\n' });
   let checked = gate(root);
@@ -385,7 +385,7 @@ test('a doc of record needs id and one live code: folder inside its workspace [@
   assert.match(checked.stderr, /src\/docs\/web\.md: the "code:" folder "tools" is outside src/);
 });
 
-test('the owner of a runtime file is the doc with the longest code: folder [@invariant sdd-enforce.gates:V18]', () => {
+test('the owner of a runtime file is the doc with the longest code: folder [@invariant enforce-sdd.gates:V18]', () => {
   const root = installed();
   mkdirSync(join(root, 'src', 'auth'), { recursive: true });
   writeFileSync(join(root, 'src', 'auth', 'login.js'), 'export const login = 1;\n', 'utf8');
@@ -409,7 +409,7 @@ test('the owner of a runtime file is the doc with the longest code: folder [@inv
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('the gate fails on a SPEC.md and on an @spec citation, and names the new form [@invariant sdd-enforce.gates:V1]', () => {
+test('the gate fails on a SPEC.md and on an @spec citation, and names the new form [@invariant enforce-sdd.gates:V1]', () => {
   const root = installed();
   writeFileSync(join(root, 'src', 'SPEC.md'), '---\nid: fixture.old\n---\n\nV1: Old.\n', 'utf8');
   writeFileSync(join(root, 'src', 'old.test.js'), "test('old [@spec fixture.old:V1]', () => {});\n", 'utf8');
@@ -419,7 +419,7 @@ test('the gate fails on a SPEC.md and on an @spec citation, and names the new fo
   assert.match(checked.stderr, /src\/old\.test\.js: "@spec fixture\.old:V1" is the citation form before 1\.0\.0\. Write "@invariant fixture\.old:V1" instead/);
 });
 
-test('existing AGENTS.md requires an explicit merge before the tool lines are added [@invariant sdd-enforce.gates:V13]', () => {
+test('existing AGENTS.md requires an explicit merge before the tool lines are added [@invariant enforce-sdd.gates:V13]', () => {
   const root = fixture();
   writeFileSync(join(root, 'AGENTS.md'), '# Existing policy\n\nTeam text.\n', 'utf8');
   git(root, ['add', 'AGENTS.md']);
@@ -440,7 +440,7 @@ test('existing AGENTS.md requires an explicit merge before the tool lines are ad
   assert.equal(readFileSync(join(root, 'AGENTS.md'), 'utf8'), `# Existing policy\n\n${POINTER}\n\nTeam text.\n`);
 });
 
-test('the docs standard line from the config goes into AGENTS.md and check-docs asserts it [@invariant sdd-enforce.gates:V13]', () => {
+test('the docs standard line from the config goes into AGENTS.md and check-docs asserts it [@invariant enforce-sdd.gates:V13]', () => {
   const root = installed();
   const line = 'Where each doc goes and how to write it: the [docs standard](https://example.invalid/map.md).';
   const configPath = join(root, '.agent-sdd', 'config.json');
@@ -512,7 +512,7 @@ test('config profile requires and validates repository-specific surface mapping'
   assert.equal(complete.status, 0, `${complete.stdout}\n${complete.stderr}`);
 });
 
-test('a staged runtime edit needs a covering doc of record or a concrete Doc-Impact trailer [@invariant sdd-enforce.gates:V18]', () => {
+test('a staged runtime edit needs a covering doc of record or a concrete Doc-Impact trailer [@invariant enforce-sdd.gates:V18]', () => {
   const root = installed();
   writeFileSync(join(root, 'src', 'feature.js'), 'export const value = 1;\n', { encoding: 'utf8', flag: 'wx' });
   git(root, ['add', 'src/feature.js']);
@@ -546,7 +546,7 @@ test('a staged runtime edit needs a covering doc of record or a concrete Doc-Imp
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('--changed resolves origin/<CHANGE_TARGET> before falling back [@invariant sdd-enforce.gates:V3]', () => {
+test('--changed resolves origin/<CHANGE_TARGET> before falling back [@invariant enforce-sdd.gates:V3]', () => {
   const root = installed();
   git(root, ['update-ref', 'refs/remotes/origin/develop', 'HEAD']);
   git(root, ['checkout', '-q', '-b', 'feature']);
@@ -570,7 +570,7 @@ test('--changed resolves origin/<CHANGE_TARGET> before falling back [@invariant 
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('waivers skip a named commit in --changed mode only [@invariant sdd-enforce.gates:V4]', () => {
+test('waivers skip a named commit in --changed mode only [@invariant enforce-sdd.gates:V4]', () => {
   const root = installed();
   git(root, ['checkout', '-q', '-b', 'feature']);
   const sha = runtimeCommit(root, 'a.js', 'feat: a without trailer');
@@ -600,7 +600,7 @@ test('waivers skip a named commit in --changed mode only [@invariant sdd-enforce
   assert.match(checked.stderr, /runtime paths lack an owner change/);
 });
 
-test('adapters need Codex metadata and the right links: rule to concern doc and back, twin to skill [@invariant sdd-enforce.gates:V5]', () => {
+test('adapters need Codex metadata and the right links: rule to concern doc and back, twin to skill [@invariant enforce-sdd.gates:V5]', () => {
   const root = installed();
   rmSync(join(root, '.agents', 'skills', 'commit-changes', 'agents'), { recursive: true });
   let checked = gate(root);
@@ -688,7 +688,7 @@ test('gate messages say what is wrong and how to fix it', () => {
   assert.match(checked.stderr, /README\.md links to "docs\/missing\.md" but that file does not exist/);
 
   writeFileSync(join(root, 'src', 'core.test.js'), "test('holds [@invariant fixture.core:V1]', () => {});\n", 'utf8');
-  writeFileSync(join(root, 'README.md'), '# Fixture\n\nA repository for the sdd-enforce tests.\n', 'utf8');
+  writeFileSync(join(root, 'README.md'), '# Fixture\n\nA repository for the enforce-sdd tests.\n', 'utf8');
   assert.equal(gate(root).status, 0, gate(root).stderr);
 
   writeFileSync(join(root, 'src', 'feature.js'), 'export const value = 1;\n', 'utf8');
@@ -732,7 +732,7 @@ function preExistingRepo() {
   return root;
 }
 
-test('uninstall is a dry run by default and refuses --write without confirmation [@invariant sdd-enforce.gates:V6]', () => {
+test('uninstall is a dry run by default and refuses --write without confirmation [@invariant enforce-sdd.gates:V6]', () => {
   const root = installed();
   const before = tree(root);
 
@@ -750,7 +750,7 @@ test('uninstall is a dry run by default and refuses --write without confirmation
   assert.deepEqual(tree(root), before);
 });
 
-test('uninstall --write --yes removes only what apply added and restores user files [@invariant sdd-enforce.gates:V6]', () => {
+test('uninstall --write --yes removes only what apply added and restores user files [@invariant enforce-sdd.gates:V6]', () => {
   const root = preExistingRepo();
   const original = tree(root);
   const applied = run(['apply', root, '--write', '--merge-agents']);
@@ -762,7 +762,7 @@ test('uninstall --write --yes removes only what apply added and restores user fi
 
   const removed = run(['uninstall', root, '--write', '--yes']);
   assert.equal(removed.status, 0, `${removed.stdout}\n${removed.stderr}`);
-  assert.match(removed.stdout, /Uninstalled sdd-enforce/);
+  assert.match(removed.stdout, /Uninstalled enforce-sdd/);
   assert.match(removed.stdout, /pre-commit/);
 
   const after = tree(root);
@@ -817,7 +817,7 @@ test('asset templates never use harness-discoverable directory names', () => {
   assert.ok(existsSync(join(assetRoot, '_agents', 'skills', 'doc-of-record', 'SKILL.md')));
 });
 
-test('uninstall removes only its own hook command and keeps a user hook beside it [@invariant sdd-enforce.gates:V6]', () => {
+test('uninstall removes only its own hook command and keeps a user hook beside it [@invariant enforce-sdd.gates:V6]', () => {
   const root = installed();
   const path = join(root, '.claude', 'settings.json');
   const settings = JSON.parse(readFileSync(path, 'utf8'));
@@ -837,7 +837,7 @@ test('uninstall removes only its own hook command and keeps a user hook beside i
   assert.deepEqual(commands, ['node scripts/my-lint.mjs']);
 });
 
-test('uninstall keeps a file that existed with template content before install [@invariant sdd-enforce.gates:V6]', () => {
+test('uninstall keeps a file that existed with template content before install [@invariant enforce-sdd.gates:V6]', () => {
   const root = fixture();
   const relPath = 'docs/doc-of-record.md';
   const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', relPath), 'utf8');
@@ -851,7 +851,7 @@ test('uninstall keeps a file that existed with template content before install [
   const manifest = JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8'));
   assert.equal(manifest.managedFiles[relPath].mode, 'preserved');
   git(root, ['add', '.']);
-  git(root, ['commit', '-m', 'chore: install sdd-enforce']);
+  git(root, ['commit', '-m', 'chore: install enforce-sdd']);
 
   const removed = run(['uninstall', root, '--write', '--yes']);
   assert.equal(removed.status, 0, removed.stderr);
@@ -865,8 +865,8 @@ test('uninstall keeps a file that existed with template content before install [
   assert.match(dry2.stdout, /delete\s+docs\/doc-of-record\.md/);
 });
 
-for (const name of [SKILL_NAME, 'cross-agent-sdd']) {
-  test(`gate ignores a copy of the skill kept in the repository as ${name} [@invariant sdd-enforce.gates:V9]`, () => {
+for (const name of [SKILL_NAME, 'sdd-enforce', 'cross-agent-sdd']) {
+  test(`gate ignores a copy of the skill kept in the repository as ${name} [@invariant enforce-sdd.gates:V9]`, () => {
     const root = fixture();
     for (const harness of ['.claude', '.agents', '.cursor']) {
       cpSync(SKILL_ROOT, join(root, harness, 'skills', name), { recursive: true });
@@ -881,7 +881,7 @@ for (const name of [SKILL_NAME, 'cross-agent-sdd']) {
   });
 }
 
-test('upgrade from 0.6.0 removes retired files, the CLAUDE.md import and the .gitignore block, and moves the hook [@invariant sdd-enforce.gates:V15]', () => {
+test('upgrade from 0.6.0 removes retired files, the CLAUDE.md import and the .gitignore block, and moves the hook [@invariant enforce-sdd.gates:V15]', () => {
   const root = legacy06Installed();
   const planned = run(['plan', root]);
   assert.equal(planned.status, 0, planned.stderr);
@@ -924,7 +924,7 @@ test('upgrade from 0.6.0 removes retired files, the CLAUDE.md import and the .gi
   assert.match(failing.stderr, /docs\/workflows\/COMMIT-WORKFLOW\.md: a doc under docs\/ needs a kebab-case name/);
 });
 
-test('apply stops on a CLAUDE.md it did not create [@invariant sdd-enforce.gates:V15]', () => {
+test('apply stops on a CLAUDE.md it did not create [@invariant enforce-sdd.gates:V15]', () => {
   const root = fixture();
   writeFileSync(join(root, 'CLAUDE.md'), '# Claude notes\n\nRun make lint first.\n', 'utf8');
   git(root, ['add', 'CLAUDE.md']);
@@ -938,7 +938,7 @@ test('apply stops on a CLAUDE.md it did not create [@invariant sdd-enforce.gates
   assert.ok(existsSync(join(root, 'CLAUDE.md')));
 });
 
-test('check-docs applies the docs standard: no CLAUDE.md, kebab-case docs, sizes, skill names, live rule globs [@invariant sdd-enforce.gates:V16]', () => {
+test('check-docs applies the docs standard: no CLAUDE.md, kebab-case docs, sizes, skill names, live rule globs [@invariant enforce-sdd.gates:V16]', () => {
   const root = installed();
   assert.equal(docsGate(root).status, 0, docsGate(root).stderr);
   mkdirSync(join(root, 'apps', 'web'), { recursive: true });
@@ -959,7 +959,7 @@ test('check-docs applies the docs standard: no CLAUDE.md, kebab-case docs, sizes
   assert.match(checked.stderr, /\.claude\/rules\/lib\.md: the "paths:" glob "lib\/\*\*" matches no file/);
 });
 
-test('check-docs applies the rubric script criteria: root README, root AGENTS.md, glossary terms [@invariant sdd-enforce.gates:V16]', () => {
+test('check-docs applies the rubric script criteria: root README, root AGENTS.md, glossary terms [@invariant enforce-sdd.gates:V16]', () => {
   const root = installed();
   writeFileSync(join(root, 'README.md'), '# Fixture\n\n', 'utf8');
   writeFileSync(join(root, 'GLOSSARY.md'), '# Glossary\n\n**Bet slip**:\nThe bets a user collects.\n\n**Spec**:\nA plan.\n\n**Gotcha**:\nA trap.\n\n**Covered module**:\nA module with a doc.\n', 'utf8');
@@ -975,7 +975,7 @@ test('check-docs applies the rubric script criteria: root README, root AGENTS.md
   assert.match(checked.stderr, /missing AGENTS\.md at the repository root/);
 });
 
-test('check-docs fails on each migration detect hit and names the migration and its step [@invariant sdd-enforce.gates:V20]', () => {
+test('check-docs fails on each migration detect hit and names the migration and its step [@invariant enforce-sdd.gates:V20]', () => {
   const root = installed();
   const hits = [
     ['docs/plans/cashout.md', '# Cashout plan\n', 'plans-in-jira-not-files'],
@@ -1009,7 +1009,7 @@ test('check-docs fails on each migration detect hit and names the migration and 
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('check-docs fails on an ADR status form, a one-sided supersession, a bare research note, an open box and a contract that no source file names [@invariant sdd-enforce.gates:V21]', () => {
+test('check-docs fails on an ADR status form, a one-sided supersession, a bare research note, an open box and a contract that no source file names [@invariant enforce-sdd.gates:V21]', () => {
   const root = installed();
   const write = (path, body) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -1063,7 +1063,7 @@ test('check-docs fails on an ADR status form, a one-sided supersession, a bare r
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('check-docs fails on an ADR that a later ADR says it supersedes while its status stays silent [@invariant sdd-enforce.gates:V24]', () => {
+test('check-docs fails on an ADR that a later ADR says it supersedes while its status stays silent [@invariant enforce-sdd.gates:V24]', () => {
   const root = installed();
   const write = (path, body) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -1085,7 +1085,7 @@ test('check-docs fails on an ADR that a later ADR says it supersedes while its s
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('check-docs fails on a signature line in the Interfaces of a doc of record [@invariant sdd-enforce.gates:V25]', () => {
+test('check-docs fails on a signature line in the Interfaces of a doc of record [@invariant enforce-sdd.gates:V25]', () => {
   const root = installed();
   const lines = [
     '## Goal', '', 'The fixture exists.', '',
@@ -1132,7 +1132,7 @@ test('SKILL.md ends each required-flow step on a completion criterion and links 
   }
 });
 
-test('check-sdd fails on an API contract that no Markdown file links [@invariant sdd-enforce.gates:V26]', () => {
+test('check-sdd fails on an API contract that no Markdown file links [@invariant enforce-sdd.gates:V26]', () => {
   const root = installed();
   writeFileSync(join(root, 'docs', 'events-contract.md'), '# Events contract\n', 'utf8');
   let checked = gate(root);
@@ -1144,7 +1144,7 @@ test('check-sdd fails on an API contract that no Markdown file links [@invariant
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('check-docs warns on history words and dates in a doc of record and on a dated copy, and stays green [@invariant sdd-enforce.gates:V27]', () => {
+test('check-docs warns on history words and dates in a doc of record and on a dated copy, and stays green [@invariant enforce-sdd.gates:V27]', () => {
   const root = installed();
   const write = (path, body) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -1170,7 +1170,7 @@ test('check-docs warns on history words and dates in a doc of record and on a da
   assert.match(checked.stdout, /check-docs: ok/);
 });
 
-test('a rule needs paths: and an .agents twin when Codex or Cursor is on [@invariant sdd-enforce.gates:V22]', () => {
+test('a rule needs paths: and an .agents twin when Codex or Cursor is on [@invariant enforce-sdd.gates:V22]', () => {
   const root = installed();
   writeFileSync(join(root, '.claude', 'rules', 'x.md'), '---\ndescription: x\n---\n\n# X\n\nThe rules: [agent parity](../../docs/agent-parity.md).\n', 'utf8');
   const checked = gate(root);
@@ -1179,7 +1179,7 @@ test('a rule needs paths: and an .agents twin when Codex or Cursor is on [@invar
   assert.match(checked.stderr, /Claude rule lacks \.agents counterpart: x/);
 });
 
-test('a rule may link a concern doc in a folder that docs/map.md declares [@invariant sdd-enforce.gates:V22]', () => {
+test('a rule may link a concern doc in a folder that docs/map.md declares [@invariant enforce-sdd.gates:V22]', () => {
   const root = installed();
   const write = (path, body) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -1202,7 +1202,7 @@ test('a rule may link a concern doc in a folder that docs/map.md declares [@inva
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('--changed follows a moved folder like --staged does [@invariant sdd-enforce.gates:V22]', () => {
+test('--changed follows a moved folder like --staged does [@invariant enforce-sdd.gates:V22]', () => {
   const root = installed();
   mkdirSync(join(root, 'src', 'a'), { recursive: true });
   writeFileSync(join(root, 'src', 'a', 'x.js'), 'export const x = 1;\n', 'utf8');
@@ -1217,12 +1217,12 @@ test('--changed follows a moved folder like --staged does [@invariant sdd-enforc
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('audit warns when the installed standard is newer than the ported checks [@invariant sdd-enforce.gates:V23]', () => {
+test('audit warns when the installed standard is newer than the ported checks [@invariant enforce-sdd.gates:V23]', () => {
   const root = installed();
   const config = JSON.parse(readFileSync(join(root, '.agent-sdd', 'config.json'), 'utf8'));
   assert.deepEqual(config.docsStandard, { name: '', version: '0.10.0' });
 
-  const standard = mkdtempSync(join(tmpdir(), 'sdd-enforce-standard-'));
+  const standard = mkdtempSync(join(tmpdir(), 'enforce-sdd-standard-'));
   fixtures.push(standard);
   mkdirSync(join(standard, '.claude-plugin'), { recursive: true });
   const pluginJson = join(standard, '.claude-plugin', 'plugin.json');
@@ -1240,7 +1240,7 @@ test('audit warns when the installed standard is newer than the ported checks [@
   }
 });
 
-test('plan lists the values apply needs from the user [@invariant sdd-enforce.gates:V23]', () => {
+test('plan lists the values apply needs from the user [@invariant enforce-sdd.gates:V23]', () => {
   const root = fixture();
   let planned = run(['plan', root]);
   assert.equal(planned.status, 0, planned.stderr);
@@ -1287,7 +1287,7 @@ test('no template, skill doc or reference names an organization', () => {
   assert.deepEqual(offenders, []);
 });
 
-test('frontmatter values with quotes and apostrophes read as YAML, and an accepted ADR supersedes nothing [@invariant sdd-enforce.gates:V21]', () => {
+test('frontmatter values with quotes and apostrophes read as YAML, and an accepted ADR supersedes nothing [@invariant enforce-sdd.gates:V21]', () => {
   const root = installed();
   const write = (path, body) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -1302,7 +1302,7 @@ test('frontmatter values with quotes and apostrophes read as YAML, and an accept
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('in a repo with no workspace the root AGENTS.md owns a runtime file that no doc holds [@invariant sdd-enforce.gates:V18]', () => {
+test('in a repo with no workspace the root AGENTS.md owns a runtime file that no doc holds [@invariant enforce-sdd.gates:V18]', () => {
   const root = installed();
   writeFileSync(join(root, 'src', 'index.js'), 'export const index = 1;\n', 'utf8');
   writeFileSync(join(root, 'AGENTS.md'), `${readFileSync(join(root, 'AGENTS.md'), 'utf8')}\n- index exports 1.\n`, 'utf8');
@@ -1313,7 +1313,7 @@ test('in a repo with no workspace the root AGENTS.md owns a runtime file that no
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('check-sdd skips a SPEC.md and an @spec citation under test fixtures, as the audit does [@invariant sdd-enforce.gates:V1]', () => {
+test('check-sdd skips a SPEC.md and an @spec citation under test fixtures, as the audit does [@invariant enforce-sdd.gates:V1]', () => {
   const root = installed();
   mkdirSync(join(root, 'evals', 'case'), { recursive: true });
   writeFileSync(join(root, 'evals', 'case', 'SPEC.md'), '---\nid: case.old\n---\n\nV1: Old.\n', 'utf8');
@@ -1359,12 +1359,12 @@ test('a people-started skill has an imperative name and disable-model-invocation
   }
 });
 
-test('docs/map.md holds the rows the tool adds, in a block that merge and uninstall respect [@invariant sdd-enforce.gates:V19]', () => {
+test('docs/map.md holds the rows the tool adds, in a block that merge and uninstall respect [@invariant enforce-sdd.gates:V19]', () => {
   const lean = fixture();
   assert.equal(run(['apply', lean, '--write', '--agents', 'claude']).status, 0);
   const leanMap = readFileSync(join(lean, 'docs', 'map.md'), 'utf8');
   assert.match(leanMap, /^# Docs map: rows this repository adds\n/);
-  assert.match(leanMap, /<!-- sdd-enforce:start -->\n\| You have… \| It goes in \| Living \| Loaded \|/);
+  assert.match(leanMap, /<!-- enforce-sdd:start -->\n\| You have… \| It goes in \| Living \| Loaded \|/);
   assert.match(leanMap, /`\.agent-sdd\/waivers\.json`/);
   assert.doesNotMatch(leanMap, /\.agents\/skills|\.codex\/hooks\.json/, 'rows follow the enabled agents');
 
@@ -1386,7 +1386,38 @@ test('docs/map.md holds the rows the tool adds, in a block that merge and uninst
   assert.equal(readFileSync(join(root, 'docs', 'map.md'), 'utf8'), own);
 });
 
-test('a hook config change needs every other enabled hook config, never itself; a skill or its twin may change alone [@invariant sdd-enforce.gates:V8]', () => {
+/** docs/map.md and the manifest as an install under the former name sdd-enforce left them. */
+function formerNameInstalled() {
+  const root = installed();
+  const mapPath = join(root, 'docs', 'map.md');
+  writeFileSync(mapPath, readFileSync(mapPath, 'utf8').replaceAll('<!-- enforce-sdd:', '<!-- sdd-enforce:'), 'utf8');
+  const manifestPath = join(root, '.agent-toolchain.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  manifest.generator.name = 'sdd-enforce';
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'chore: state left by the former name']);
+  return root;
+}
+
+test('apply renames the map block and the generator of an install under the former name sdd-enforce [@invariant enforce-sdd.gates:V19]', () => {
+  const root = formerNameInstalled();
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  const map = readFileSync(join(root, 'docs', 'map.md'), 'utf8');
+  assert.doesNotMatch(map, /sdd-enforce:(start|end)/);
+  assert.equal(map.match(/<!-- enforce-sdd:start -->/g).length, 1, 'one block, not a second one beside the old');
+  assert.equal(map.match(/`\.agent-sdd\/waivers\.json`/g).length, 1);
+  assert.equal(JSON.parse(readFileSync(join(root, '.agent-toolchain.json'), 'utf8')).generator.name, SKILL_NAME);
+});
+
+test('uninstall removes the map block of an install under the former name sdd-enforce [@invariant enforce-sdd.gates:V19]', () => {
+  const root = formerNameInstalled();
+  assert.equal(run(['uninstall', root, '--write', '--yes']).status, 0);
+  assert.equal(existsSync(join(root, 'docs', 'map.md')), false);
+});
+
+test('a hook config change needs every other enabled hook config, never itself; a skill or its twin may change alone [@invariant enforce-sdd.gates:V8]', () => {
   const root = installed();
   const message = join(root, 'msg.txt');
   writeFileSync(message, 'chore: widen matcher\n', 'utf8');
@@ -1419,7 +1450,7 @@ test('a hook config change needs every other enabled hook config, never itself; 
   }
 });
 
-test('.claude/rules/INDEX.md is not a rule: no .cursor mirror, no Agent-Parity trailer [@invariant sdd-enforce.gates:V2]', () => {
+test('.claude/rules/INDEX.md is not a rule: no .cursor mirror, no Agent-Parity trailer [@invariant enforce-sdd.gates:V2]', () => {
   const root = installed();
   const message = join(root, 'msg.txt');
   writeFileSync(message, 'docs: index the rules\n', 'utf8');
@@ -1448,7 +1479,7 @@ test('docs tell CI to run the per-commit gate, not only the static one', () => {
   assert.match(readFileSync(join(SKILL_ROOT, 'README.md'), 'utf8'), /static[^\n]*alone[^\n]*--changed|--changed[^\n]*static[^\n]*alone/i);
 });
 
-test('re-apply with fewer profiles keeps ownership of files still on disk [@invariant sdd-enforce.gates:V7]', () => {
+test('re-apply with fewer profiles keeps ownership of files still on disk [@invariant enforce-sdd.gates:V7]', () => {
   const root = fixture();
   const full = run(['apply', root, '--write', '--profiles', 'core,sdd,helm']);
   assert.equal(full.status, 0, full.stderr);
@@ -1467,7 +1498,7 @@ test('re-apply with fewer profiles keeps ownership of files still on disk [@inva
   assert.match(dry.stdout, /delete\s+docs\/helm-validation\.md/);
 });
 
-test('apply skips a generated file you edited and upgrades the rest [@invariant sdd-enforce.gates:V7]', () => {
+test('apply skips a generated file you edited and upgrades the rest [@invariant enforce-sdd.gates:V7]', () => {
   const root = installed();
   const manifestPath = join(root, '.agent-toolchain.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -1504,7 +1535,7 @@ test('apply skips a generated file you edited and upgrades the rest [@invariant 
   assert.match(dry.stdout, /keep\s+scripts\/check-sdd\.mjs.*edited/);
 });
 
-test('apply never upgrades a preserved file and verify does not police it [@invariant sdd-enforce.gates:V7]', () => {
+test('apply never upgrades a preserved file and verify does not police it [@invariant enforce-sdd.gates:V7]', () => {
   const root = fixture();
   const relPath = 'docs/doc-of-record.md';
   const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', relPath), 'utf8');
@@ -1575,7 +1606,7 @@ test('apply --replace takes the tool version back with the documented pre-commit
   assert.match(unknown.stderr, /--replace src\/app\.ts/);
 });
 
-test('adopting a preserved file makes it tool-owned, by --replace or by delete and re-apply [@invariant sdd-enforce.gates:V7]', () => {
+test('adopting a preserved file makes it tool-owned, by --replace or by delete and re-apply [@invariant enforce-sdd.gates:V7]', () => {
   const relPath = 'docs/doc-of-record.md';
   const template = readFileSync(join(SKILL_ROOT, 'assets', 'repository', relPath), 'utf8');
   const preserved = () => {
@@ -1607,7 +1638,7 @@ test('adopting a preserved file makes it tool-owned, by --replace or by delete a
   assert.equal(mode(byDelete), 'created');
 });
 
-test('a Doc-Impact reason may fold over continuation lines, like a Git trailer [@invariant sdd-enforce.gates:V10]', () => {
+test('a Doc-Impact reason may fold over continuation lines, like a Git trailer [@invariant enforce-sdd.gates:V10]', () => {
   const root = installed();
   const message = join(root, 'msg.txt');
   writeFileSync(join(root, 'src', 'folded.js'), 'export const value = 1;\n', 'utf8');
@@ -1633,7 +1664,7 @@ test('a Doc-Impact reason may fold over continuation lines, like a Git trailer [
   assert.match(checked.stderr, /does not name src\/folded\.js/);
 });
 
-test('docs/README.md indexes every doc of record, and the nearest AGENTS.md links the index [@invariant sdd-enforce.gates:V11]', () => {
+test('docs/README.md indexes every doc of record, and the nearest AGENTS.md links the index [@invariant enforce-sdd.gates:V11]', () => {
   const root = installed();
   // A repo with no workspace: the root is the one workspace, so its index is docs/README.md.
   writeFileSync(join(root, 'docs', 'core.md'), '---\nid: fixture.core\ncode: src\n---\n\n# Core\n\n## Goal\n\nThe fixture exists.\n', 'utf8');
@@ -1656,7 +1687,7 @@ test('docs/README.md indexes every doc of record, and the nearest AGENTS.md link
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('check-docs demands a covering doc per module, its index row, the index link and the root pointer, and no AGENTS.md per workspace [@invariant sdd-enforce.gates:V11]', () => {
+test('check-docs demands a covering doc per module, its index row, the index link and the root pointer, and no AGENTS.md per workspace [@invariant enforce-sdd.gates:V11]', () => {
   const root = fixture();
   mkdirSync(join(root, 'apps', 'api', 'src', 'modules', 'auth'), { recursive: true });
   writeFileSync(join(root, 'apps', 'api', 'package.json'), '{ "name": "api" }\n', 'utf8');
@@ -1710,7 +1741,7 @@ test('check-docs demands a covering doc per module, its index row, the index lin
   assert.match(verified.stderr, /scripts\/check-docs\.mjs\) reported problems/);
 });
 
-test('both gates skip Claude Code worktrees nested inside the checkout [@invariant sdd-enforce.gates:V12]', () => {
+test('both gates skip Claude Code worktrees nested inside the checkout [@invariant enforce-sdd.gates:V12]', () => {
   const root = installed();
   writeDoc(root, 'docs/core.md', { id: 'acme.core', body: '## Invariants\n\nV1: Fixture holds.\n' });
   // A worktree is a full copy of the repository: the same doc id again, and a broken link.
@@ -1728,7 +1759,7 @@ test('both gates skip Claude Code worktrees nested inside the checkout [@invaria
   assert.equal(docs.status, 0, docs.stderr);
 });
 
-test('the root AGENTS.md gets only the tool lines, never a managed block [@invariant sdd-enforce.gates:V13]', () => {
+test('the root AGENTS.md gets only the tool lines, never a managed block [@invariant enforce-sdd.gates:V13]', () => {
   const root = installed();
   const agentsPath = join(root, 'AGENTS.md');
   assert.equal(readFileSync(agentsPath, 'utf8'), `# Repository agent instructions\n\n${POINTER}\n`);
@@ -1762,7 +1793,7 @@ test('the root AGENTS.md gets only the tool lines, never a managed block [@invar
   assert.match(verified.stderr, /does not link docs\/doc-of-record\.md/);
 });
 
-test('upgrade turns an unedited 0.4.0 AGENTS block into the pointer and keeps an edited one until --replace [@invariant sdd-enforce.gates:V13]', () => {
+test('upgrade turns an unedited 0.4.0 AGENTS block into the pointer and keeps an edited one until --replace [@invariant enforce-sdd.gates:V13]', () => {
   const root = legacyInstalled();
   const agentsPath = join(root, 'AGENTS.md');
   const planned = run(['plan', root]);
@@ -1797,7 +1828,7 @@ test('upgrade turns an unedited 0.4.0 AGENTS block into the pointer and keeps an
   assert.equal(body.split('\n').filter((line) => line === POINTER).length, 1);
 });
 
-test('upgrade swaps the 0.6.0 import line for the pointer and keeps the team text [@invariant sdd-enforce.gates:V13]', () => {
+test('upgrade swaps the 0.6.0 import line for the pointer and keeps the team text [@invariant enforce-sdd.gates:V13]', () => {
   const root = installed();
   const agentsPath = join(root, 'AGENTS.md');
   writeFileSync(agentsPath, `# Repository agent instructions\n\n## Doc map\n\nDeploy through make deploy.\n\n${LEGACY_IMPORT}\n`, 'utf8');
@@ -1811,7 +1842,7 @@ test('upgrade swaps the 0.6.0 import line for the pointer and keeps the team tex
   assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`);
 });
 
-test('the rules index is a table in docs/agent-parity.md rendered from the shipped rules; no INDEX.md [@invariant sdd-enforce.gates:V14]', () => {
+test('the rules index is a table in docs/agent-parity.md rendered from the shipped rules; no INDEX.md [@invariant enforce-sdd.gates:V14]', () => {
   const root = fixture();
   mkdirSync(join(root, 'src', 'config'), { recursive: true });
   writeFileSync(join(root, 'src', 'config', 'app.json'), '{}\n', 'utf8');
@@ -1839,7 +1870,7 @@ test('the rules index is a table in docs/agent-parity.md rendered from the shipp
   assert.equal(checked.status, 0, checked.stderr);
 });
 
-test('upgrade deletes the unedited 0.4.0 rules index and keeps an edited one [@invariant sdd-enforce.gates:V14]', () => {
+test('upgrade deletes the unedited 0.4.0 rules index and keeps an edited one [@invariant enforce-sdd.gates:V14]', () => {
   const root = legacyInstalled();
   const index = join(root, '.claude', 'rules', 'INDEX.md');
   const planned = run(['plan', root]);

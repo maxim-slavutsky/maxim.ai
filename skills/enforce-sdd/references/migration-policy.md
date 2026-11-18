@@ -23,6 +23,7 @@ What `plan`/`apply` do with each file class:
 | `.gitignore` with the `cross-agent-sdd` `changes-log.md` block | Block removed (`update`); file deleted when the tool created it and nothing else remains |
 | Hook config that runs `scripts/hooks/post-edit-reminder.mjs` | Command moved to `.claude/hooks/post-edit-reminder.mjs` (`merge`); other hooks stay |
 | `docs/map.md` absent / without block / with block | `create` / `merge` (block appended, own rows stay) / `update` or `preserve` |
+| `docs/map.md` with the block between the `sdd-enforce` markers of the former name | Markers and rows rewritten (`update`); own rows stay |
 | User-owned compatible `AGENTS.md` | Preserve; add the tool lines only after review (`--merge-agents`) |
 | User-owned conflicting file | Stop and choose canonical owner explicitly |
 
