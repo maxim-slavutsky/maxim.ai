@@ -43,21 +43,27 @@ Arguments: `$ARGUMENTS`
 ## Required flow
 
 1. Identify target Git root. Read existing `AGENTS.md`, `CLAUDE.md`, agent rules/skills/hooks, docs,
-   package scripts, Git hooks, and CI configuration before proposing changes.
+   package scripts, Git hooks, and CI configuration before proposing changes. Done when you can name each
+   existing instruction file, gate and hook, and the harness that reads it.
 2. Run `audit`; treat its output as evidence, not permission to mutate. Its old-format list (`SPEC.md`,
    `CLAUDE.md`, non-kebab docs, `@spec` citations) is work for step 6: the gates fail on every item. When
    `docsStandard.name` in `.agent-sdd/config.json` names an installed plugin, run `audit <repo> --standard
-   <plugin root>` and report its warning: a newer standard has rules the gates do not check yet.
+   <plugin root>` and report its warning: a newer standard has rules the gates do not check yet. Done when
+   each old-format item has a move planned for step 6.
 3. Select only applicable profiles and agents. Read:
    - [configuration](references/configuration.md) for profiles, commands, waivers, and config-gate mapping;
    - [harness matrix](references/harness-matrix.md) before changing agent-specific files;
    - [migration policy](references/migration-policy.md) when target already has instructions, gates, or an older install.
+
+   Done when the profile list and the agent list are fixed, each with its reason.
 4. Run `plan`. Present conflicts, rules listed under "Not written", and material choices before applying when
    they change repository policy. For each name under "Needs a value" (`docsStandardLine`,
-   `docsStandard.name`), ask the user, write the answer to `.agent-sdd/config.json`, and plan again.
+   `docsStandard.name`), ask the user, write the answer to `.agent-sdd/config.json`, and plan again. Done when
+   the user has seen every conflict and "Needs a value" is empty.
 5. Prefer a separate Git worktree for application. Run `apply --write` only after scope is established.
    Existing unowned files are conflicts; never add `--merge-agents`, replace hooks, or weaken a gate merely
-   to make application succeed without inspecting the target.
+   to make application succeed without inspecting the target. Done when `apply --write` exits 0 and its
+   summary lists no conflict.
 6. Complete target-specific work the generator cannot infer safely:
    - add the `AGENTS.md` tool lines with `--merge-agents` when required;
    - map actual runtime/config ownership in `.agent-sdd/config.json`: `runtimeRoots`, `moduleRoots` (folders whose
@@ -80,10 +86,15 @@ Arguments: `$ARGUMENTS`
    - fill the workspace filter table in `.claude/skills/commit-changes/SKILL.md`, the surfaces table in
      `docs/app-config.md`, and the rules index rows for repository-specific rules in `docs/agent-parity.md`;
    - update package-manager aliases only when useful.
+
+   Done when `audit` lists no old-format item, each table named above is filled, and both hooks and CI run the
+   gates.
 7. Run `verify` (runs both gates), and repository-native tests. Report remaining manual migration debt.
    Commits already on a shared branch that fail a per-change gate go into `.agent-sdd/waivers.json` with a
-   full SHA and a concrete reason; new work never gets a waiver.
-8. Do not commit, push, open a PR, merge, or delete a worktree unless the user requested that action.
+   full SHA and a concrete reason; new work never gets a waiver. Done when `verify` exits 0, or the report
+   names each failing line with its cause.
+8. Leave the result in the working tree. Commit, push, open a PR, merge, or delete a worktree only when the
+   user asked for that action. Done when the report says what is not committed.
 
 ## CLI
 
@@ -108,6 +119,8 @@ files marked delete and edit, and ask for an explicit yes in the conversation. O
 cannot undo: Git hook lines, CI steps, and package-manager aliases they added for `scripts/check-sdd.mjs`.
 
 ## Red flags under pressure
+
+After an edit to this file, run the scenarios in [pressure tests](references/pressure-tests.md) again.
 
 | Thought | Reality |
 |---|---|

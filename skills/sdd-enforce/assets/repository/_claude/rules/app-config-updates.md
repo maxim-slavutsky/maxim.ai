@@ -1,6 +1,5 @@
 ---
-name: Runtime application config parity
-description: Use when adding, removing or renaming a runtime config key. Update every surface in the same change, from the validator and the shipped copies to the typed reader and the doc of record.
+description: Use when adding, removing or renaming a runtime config key.
 paths:
   - "**/config/**"
   - "**/configs/**"

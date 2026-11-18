@@ -1104,6 +1104,34 @@ test('check-docs fails on a signature line in the Interfaces of a doc of record 
   assert.equal(checked.status, 0, checked.stderr);
 });
 
+test('a shipped rule has paths and a one-sentence trigger as its description, and no name', () => {
+  const dir = join(SKILL_ROOT, 'assets', 'repository', '_claude', 'rules');
+  for (const name of readdirSync(dir)) {
+    const body = readFileSync(join(dir, name), 'utf8').replaceAll('\r\n', '\n');
+    const block = body.slice(4, body.indexOf('\n---\n', 4));
+    assert.match(block, /^paths:/m, name);
+    // The imperatives sit in the body once. A description that repeats them is a copy that drifts.
+    assert.doesNotMatch(block, /^name:/m, `${name}: Claude Code reads no rule name`);
+    assert.match(block.match(/^description:\s*(.+)$/m)?.[1] ?? '', /^Use when [^.]+\.$/, `${name}: one sentence that says when the rule applies`);
+  }
+});
+
+test('SKILL.md ends each required-flow step on a completion criterion and links every reference file', () => {
+  const body = readFileSync(join(SKILL_ROOT, 'SKILL.md'), 'utf8').replaceAll('\r\n', '\n');
+  const flow = body.slice(body.indexOf('## Required flow'), body.indexOf('## CLI'));
+  const steps = flow.split(/\n(?=\d+\. )/).slice(1);
+  assert.equal(steps.length, 8);
+  for (const step of steps) {
+    // The last sentence of the step is its criterion: nothing follows "Done when ..." but its own period.
+    const flat = step.replace(/\s+/g, ' ').trim();
+    const criterion = flat.slice(flat.lastIndexOf('Done when '));
+    assert.match(criterion, /^Done when (?:(?!\. ).)+\.$/, flat.slice(0, 40));
+  }
+  for (const name of readdirSync(join(SKILL_ROOT, 'references'))) {
+    assert.ok(body.includes(`(references/${name})`), `SKILL.md links references/${name}`);
+  }
+});
+
 test('check-sdd fails on an API contract that no Markdown file links [@invariant sdd-enforce.gates:V26]', () => {
   const root = installed();
   writeFileSync(join(root, 'docs', 'events-contract.md'), '# Events contract\n', 'utf8');
