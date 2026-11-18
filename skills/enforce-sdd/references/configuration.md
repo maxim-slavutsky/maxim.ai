@@ -49,6 +49,7 @@ profile only to make the installation look complete.
   "exclude": ["node_modules", "dist", "build", "coverage", "vendor"],
   "configGroups": [],
   "helmCharts": [],
+  "workspaces": [],
   "docsStandardLine": "",
   "docsStandard": { "name": "", "version": "0.10.0" }
 }
@@ -61,6 +62,7 @@ profile only to make the installation look complete.
 | `exclude` | No slash = directory name skipped anywhere (`vendor`). With a slash = repo-relative prefix (`apps/samples`, `docs/archive`). `.claude/worktrees` is always skipped. |
 | `configGroups` | `config` profile only. See below. |
 | `helmCharts` | `helm` profile only. See below. |
+| `workspaces` | The map from path prefix to task-runner filter, which the `commit-changes` skill reads: `{ "prefix": "apps/web-api/", "filter": "web-api", "notes": "" }`. `notes` names the other workspaces to run, such as every user of a shared package. Empty by default; apply keeps the entries. `check-sdd` fails on an entry without `prefix` or `filter` and on a `prefix` that holds no file. `check-docs` warns on an empty list when the repository has a workspace manifest. |
 | `docsStandardLine` | Empty by default. Non-empty: apply inserts it into the root `AGENTS.md` above the pointer line; `check-docs` requires that exact (trimmed) line. |
 | `docsStandard` | `name`: the plugin that holds the organization's docs standard, from the user. `version`: the standard version whose script checks the gates port; apply writes it. `audit --standard <plugin root>` warns when the installed standard is newer. |
 
@@ -115,7 +117,8 @@ application after inspecting its actual config flow:
 `source` must be JSON. The gate extracts leaf key names. `json` surfaces must contain matching paths; `text`
 surfaces must mention every leaf key. This conservative generic check can produce false positives and negatives
 for computed configuration. Replace or extend the generated gate with repository-specific parsing and tests when
-needed. Record the surfaces table in `docs/app-config.md`.
+needed. `docs/app-config.md` points at these groups and holds no table of its own: it is a generated file, and
+`verify` fails on an edit of a generated file.
 
 ### Helm charts
 

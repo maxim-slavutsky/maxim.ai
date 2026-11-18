@@ -29,6 +29,7 @@ critical:
   - V25
   - V26
   - V27
+  - V28
 ---
 
 # enforce-sdd installer and gates
@@ -203,3 +204,13 @@ outside fenced blocks, that holds a history word (`used to`, `no longer`, `any m
 `revisit`, `not chosen`, `today`, `planned`) or an ISO date. It warns on a living doc under `archive/` or with a
 name that ends in `-old`, a year or `.v<n>`. ADRs and research notes are outside the warnings. It prints at most
 20 lines and the count of the rest.
+
+V28: No shipped template and no step of the skill's required flow asks for an edit of a generated file, because
+verify fails on one. A value of the repository goes in `.agent-sdd/config.json`: `workspaces` holds the map from
+path prefix to task-runner filter that the `commit-changes` skill reads, and `configGroups` holds the surfaces of
+each config shape. Apply writes `workspaces` as an empty list and keeps its entries on a re-apply. A fact about
+a Helm chart goes in the `AGENTS.md` nearest to the chart. The rules index lists the shipped rules only.
+`scripts/check-sdd.mjs` fails on a `workspaces` value that is not a list, on an entry without `prefix` or
+`filter`, and on a `prefix` that holds no file. `scripts/check-docs.mjs` warns, and stays green, when the list is
+empty and the repository has `pnpm-workspace.yaml` or `workspaces` in its root `package.json`. Plan names the
+new home of those values in the reason of a `keep` or a `conflict` on one of the four files that held them.

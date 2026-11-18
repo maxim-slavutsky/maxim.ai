@@ -22,6 +22,7 @@ What `plan`/`apply` do with each file class:
 | Any other `CLAUDE.md` | `conflict`. Read it, move each line `AGENTS.md` lacks into the `AGENTS.md` beside it, delete it, re-run |
 | `.gitignore` with the `cross-agent-sdd` `changes-log.md` block | Block removed (`update`); file deleted when the tool created it and nothing else remains |
 | Hook config that runs `scripts/hooks/post-edit-reminder.mjs` | Command moved to `.claude/hooks/post-edit-reminder.mjs` (`merge`); other hooks stay |
+| A table the repository filled inside a generated file up to 1.0.0 (`.claude/skills/commit-changes/SKILL.md`, `docs/app-config.md`, `docs/helm-validation.md`, `docs/agent-parity.md`) | The file is `keep` or `conflict`, and the plan reason names the new home. Move the workspace filter rows to `workspaces` and the surfaces to `configGroups` in `.agent-sdd/config.json`, and the chart facts to the `AGENTS.md` nearest to the chart. Rules index rows of the repository's own rules go. Then `apply --write --replace <path>` |
 | `docs/map.md` absent / without block / with block | `create` / `merge` (block appended, own rows stay) / `update` or `preserve` |
 | `docs/map.md` with the block between the `sdd-enforce` markers of the former name | Markers and rows rewritten (`update`); own rows stay |
 | User-owned compatible `AGENTS.md` | Preserve; add the tool lines only after review (`--merge-agents`) |

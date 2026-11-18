@@ -62,8 +62,11 @@ Arguments: `$ARGUMENTS`
    the user has seen every conflict and "Needs a value" is empty.
 5. Prefer a separate Git worktree for application. Run `apply --write` only after scope is established.
    Existing unowned files are conflicts; never add `--merge-agents`, replace hooks, or weaken a gate merely
-   to make application succeed without inspecting the target. Done when `apply --write` exits 0 and its
-   summary lists no conflict.
+   to make application succeed without inspecting the target. `apply` stops on uncommitted changes, and the
+   `CLAUDE.md` move of step 6 comes before `apply`, so it leaves some. When `git status --porcelain` lists only
+   files you changed in this flow, add `--allow-dirty` and name those files in the report. When it lists any
+   other file, stop: the user commits or stashes it. Done when `apply --write` exits 0 and its summary lists no
+   conflict.
 6. Complete target-specific work the generator cannot infer safely:
    - add the `AGENTS.md` tool lines with `--merge-agents` when required;
    - map actual runtime/config ownership in `.agent-sdd/config.json`: `runtimeRoots`, `moduleRoots` (folders whose
@@ -83,12 +86,14 @@ Arguments: `$ARGUMENTS`
      commit that CI or a release job writes carries its own `Doc-Impact: none - <reason>` trailer. A CI skip
      marker such as `[skip ci]` skips the per-change stage only for those commits;
    - regenerate `.cursor/rules/*.mdc` with `node scripts/gen-cursor-rules.mjs` after any `.claude/rules` edit;
-   - fill the workspace filter table in `.claude/skills/commit-changes/SKILL.md`, the surfaces table in
-     `docs/app-config.md`, and the rules index rows for repository-specific rules in `docs/agent-parity.md`;
+   - name the repository's own values in `.agent-sdd/config.json`, never in a generated file (`verify` fails on
+     an edited one): `workspaces` holds the map from path prefix to task-runner filter that the
+     `commit-changes` skill reads, and `configGroups` holds the surfaces of each config shape. A fact about a
+     Helm chart (CRD schema folder, tool path, follow-up check) goes in the `AGENTS.md` nearest to the chart;
    - update package-manager aliases only when useful.
 
-   Done when `audit` lists no old-format item, each table named above is filled, and both hooks and CI run the
-   gates.
+   Done when `audit` lists no old-format item, `workspaces` names each workspace (and `configGroups` each
+   config shape when the `config` profile is on), and both hooks and CI run the gates.
 7. Run `verify` (runs both gates), and repository-native tests. Report remaining manual migration debt.
    Commits already on a shared branch that fail a per-change gate go into `.agent-sdd/waivers.json` with a
    full SHA and a concrete reason; new work never gets a waiver. Done when `verify` exits 0, or the report
@@ -119,8 +124,6 @@ files marked delete and edit, and ask for an explicit yes in the conversation. O
 cannot undo: Git hook lines, CI steps, and package-manager aliases they added for `scripts/check-sdd.mjs`.
 
 ## Red flags under pressure
-
-After an edit to this file, run the scenarios in [pressure tests](references/pressure-tests.md) again.
 
 | Thought | Reality |
 |---|---|
@@ -155,6 +158,8 @@ After an edit to this file, run the scenarios in [pressure tests](references/pre
   `Spec-Impact:` as the old name of `Doc-Impact:`, because commits already on shared branches carry it.
 - User-owned conflicts stop application. `--force` never authorizes replacement of an unowned directory.
 - Waivers cover only commits already on a shared branch; `--staged` never reads them.
+- `--allow-dirty` never covers a change you did not make in this flow. The install diff then holds only the
+  tool's files and your own moves.
 - `--yes` on `uninstall` stands for a confirmation the user gave in this conversation after
   seeing the dry-run list. Never pass it on your own initiative.
 - Green structural gates do not prove intended behavior. Reconcile doc of record, evidence, and code manually.

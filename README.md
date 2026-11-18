@@ -36,7 +36,7 @@ README has the details.
 
 | Skill | Claude Code command | What it does | Docs |
 |---|---|---|---|
-| `enforce-sdd` | `/maxim-ai:enforce-sdd` | Installs one spec-driven-development policy into a repository for Claude Code, Codex, and Cursor: shared instructions, thin per-tool adapters, a post-edit reminder hook, and a commit-time gate. Formerly `sdd-enforce` and `cross-agent-sdd`. | [README](skills/enforce-sdd/README.md) · [SKILL.md](skills/enforce-sdd/SKILL.md) · [doc of record](docs/enforce-sdd.md) |
+| `enforce-sdd` | `/maxim-ai:enforce-sdd` | Installs one spec-driven-development policy into a repository for Claude Code, Codex, and Cursor: shared instructions, thin per-tool adapters, a post-edit reminder hook, and a commit-time gate. Formerly `sdd-enforce` and `cross-agent-sdd`. | [README](skills/enforce-sdd/README.md) · [SKILL.md](skills/enforce-sdd/SKILL.md) · [doc of record](docs/enforce-sdd.md) · [pressure tests](docs/enforce-sdd-pressure-tests.md), to run again after each `SKILL.md` edit |
 
 ## Repository layout
 

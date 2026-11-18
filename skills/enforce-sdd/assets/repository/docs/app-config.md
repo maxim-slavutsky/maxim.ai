@@ -4,9 +4,10 @@ How a change to the shape of the runtime configuration reaches every copy of tha
 
 The rule [`.claude/rules/app-config-updates.md`](../.claude/rules/app-config-updates.md) loads these rules when an agent reads a config file.
 
-A repository with several config shapes gives each shape its own section below, with its own surfaces
-table. Examples are a service settings file, a browser `window.CONFIG` and a registry. Split the rule into
-one rule per shape, with narrow path globs, and let each rule link its section.
+A repository with several config shapes gives each shape its own group in `configGroups`. Examples are a
+service settings file, a browser `window.CONFIG` and a registry. A shape that needs rules of its own gets a
+rule and a concern doc of the repository, with their own names and narrow path globs. This file stays as
+the tool wrote it, because an upgrade replaces it.
 
 ## Rules
 
@@ -28,7 +29,9 @@ the values and real credentials of one machine. The tracked files never hold the
 
 ## Surfaces
 
-Write one table per config shape, with `file | role`. Fill it when you know the repository:
+The surfaces of each config shape are the `surfaces` of its group in `configGroups` in
+`.agent-sdd/config.json`, and `source` is the file the gate reads the key names from. The gate checks those
+paths, so the list there is the one that is true. A typical shape has these surfaces:
 
 | File | Role |
 |---|---|

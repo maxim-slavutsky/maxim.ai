@@ -167,8 +167,24 @@ function checkStandard() {
 }
 
 // Advice: what a script can suspect and only a reader can decide. It never changes the exit code.
+// The commit-changes skill reads the map from path prefix to task-runner filter in "workspaces". An empty map
+// in a repository with a workspace manifest makes that skill guess the filter.
+function workspaceWarnings() {
+  if (!Array.isArray(config?.workspaces) || config.workspaces.length) return [];
+  let manifest = existsSync(join(ROOT, 'pnpm-workspace.yaml')) ? 'pnpm-workspace.yaml' : '';
+  if (!manifest && existsSync(join(ROOT, 'package.json'))) {
+    try {
+      if (JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).workspaces) manifest = 'package.json';
+    } catch {
+      // A broken package.json is not a docs matter.
+    }
+  }
+  if (!manifest) return [];
+  return [`.agent-sdd/config.json: "workspaces" is empty, and ${manifest} names workspaces. List each workspace there with its path prefix and its task-runner filter, so the commit-changes skill runs the right tests.`];
+}
+
 function printWarnings() {
-  const warnings = standardWarnings({ files: allFiles, read });
+  const warnings = [...standardWarnings({ files: allFiles, read }), ...workspaceWarnings()];
   if (!warnings.length) return;
   console.log(`check-docs: ${warnings.length} warning(s). They are advice and never fail the gate:`);
   for (const warning of warnings.slice(0, MAX_WARNINGS)) console.log(`  ! ${warning}`);

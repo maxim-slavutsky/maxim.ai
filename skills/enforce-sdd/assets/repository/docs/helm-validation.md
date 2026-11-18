@@ -5,15 +5,17 @@ How the repository validates its Helm charts, and what counts as a pass. The ski
 
 ## Repository facts
 
-Record here the facts that the validation depends on, when you know the repository:
+The chart roots are `helmCharts` in `.agent-sdd/config.json`. The validation never checks or fixes a
+fixture chart or a sample chart.
 
-- The chart roots are `helmCharts` in `.agent-sdd/config.json`. The validation never checks or fixes a
-  fixture chart or a sample chart.
-- If the charts use custom resources, name the committed folder of CRD schemas for offline `kubeconform`.
-- If `helm` or `kubeconform` is not on the inherited `PATH`, name the folder that holds it. Add that folder
-  to `PATH` instead of skipping the step.
-- Name each application check that must follow rendering. For example, the rendered ConfigMap must pass
-  the schema of the application. `kubeconform` checks Kubernetes shapes, not the JSON inside a ConfigMap.
+The other facts that the validation depends on are in the `AGENTS.md` nearest to each chart, never in this
+file, because the tool that generated it replaces it on upgrade. Read that `AGENTS.md` first. It names:
+
+- the committed folder of CRD schemas for offline `kubeconform`, if the charts use custom resources;
+- the folder that holds `helm` or `kubeconform`, if it is not on the inherited `PATH`. Add that folder to
+  `PATH` instead of skipping the step;
+- each application check that must follow rendering. For example, the rendered ConfigMap must pass the
+  schema of the application. `kubeconform` checks Kubernetes shapes, not the JSON inside a ConfigMap.
 
 A skipped step blocks the validation. It is not a pass. The validation checks the schema, not that the
 routes are correct.

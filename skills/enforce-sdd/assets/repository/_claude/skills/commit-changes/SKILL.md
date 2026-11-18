@@ -72,14 +72,15 @@ Done when every path in `git status` is in the commit set or in the excluded lis
 
 ## Step 2: test, build and lint the affected workspaces
 
-Find the workspaces from the paths in the commit set. Record the map from path prefix to workspace filter
-here when you know the repository:
+Find the workspaces from the paths in the commit set. The map from path prefix to workspace filter is
+`workspaces` in `.agent-sdd/config.json`: each entry holds `prefix`, `filter` and `notes`. This file never
+holds the map, because the tool that generated it replaces it on upgrade.
 
-| Path prefix | Filter | Notes |
-|---|---|---|
-| `apps/<name>/` | `<workspace name>` | |
-| `packages/<name>/` | the package **and** every workspace that uses it | |
-| shared config packages | every workspace | no filter |
+- A path under a `prefix`: use its `filter`. `notes` names the other workspaces to add, such as every
+  workspace that uses a shared package.
+- A path under no `prefix`, or an empty list: find the workspace from the nearest package manifest above the
+  path, and name the missing entry in the report.
+- A shared config package: run every workspace, with no filter.
 
 Run **one** call of the cached task runner of the repository (turbo, nx or similar), with every task and
 filter, `lint` included, and errors-only output. For example:

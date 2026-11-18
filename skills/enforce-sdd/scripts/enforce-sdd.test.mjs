@@ -1132,6 +1132,28 @@ test('SKILL.md ends each required-flow step on a completion criterion and links 
   }
 });
 
+test('the pressure-test record sits outside the skill folder, where a scenario agent is not sent to read it', () => {
+  const inSkill = readdirSync(SKILL_ROOT, { recursive: true }).filter((path) => /pressure-tests/.test(String(path)));
+  assert.deepEqual(inSkill, []);
+  for (const name of ['SKILL.md', 'README.md']) {
+    assert.doesNotMatch(readFileSync(join(SKILL_ROOT, name), 'utf8'), /pressure[- ]tests/i, name);
+  }
+  const repo = resolve(SKILL_ROOT, '..', '..');
+  assert.ok(existsSync(join(repo, 'docs', 'enforce-sdd-pressure-tests.md')));
+  assert.ok(readFileSync(join(repo, 'README.md'), 'utf8').includes('(docs/enforce-sdd-pressure-tests.md)'));
+});
+
+test('SKILL.md allows --allow-dirty only over the changes the agent made in this flow', () => {
+  const body = readFileSync(join(SKILL_ROOT, 'SKILL.md'), 'utf8').replaceAll('\r\n', '\n');
+  const flow = body.slice(body.indexOf('## Required flow'), body.indexOf('## CLI'));
+  const step = flow.split(/\n(?=\d+\. )/)[5].replace(/\s+/g, ' ');
+  assert.match(step, /^5\. /);
+  assert.match(step, /`git status --porcelain` lists only files you changed in this flow[^.]*`--allow-dirty`/);
+  assert.match(step, /lists any other file, stop/);
+  const safety = body.slice(body.indexOf('## Safety invariants')).replace(/\s+/g, ' ');
+  assert.match(safety, /`--allow-dirty` never covers a change you did not make in this flow/);
+});
+
 test('check-sdd fails on an API contract that no Markdown file links [@invariant enforce-sdd.gates:V26]', () => {
   const root = installed();
   writeFileSync(join(root, 'docs', 'events-contract.md'), '# Events contract\n', 'utf8');
@@ -1892,4 +1914,95 @@ test('upgrade deletes the unedited 0.4.0 rules index and keeps an edited one [@i
   assert.ok(existsSync(editedIndex));
   manifest = JSON.parse(readFileSync(join(edited, '.agent-toolchain.json'), 'utf8'));
   assert.equal(manifest.managedFiles['.claude/rules/INDEX.md'].kind, 'generated', 'still tracked, so uninstall sees it');
+});
+
+test('the workspace filters live in the config: apply seeds an empty list, keeps the entries, and verify stays green [@invariant enforce-sdd.gates:V28]', () => {
+  const root = installed();
+  const configPath = join(root, '.agent-sdd', 'config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  assert.deepEqual(config.workspaces, []);
+  const workspaces = [{ prefix: 'src/', filter: 'fixture', notes: 'the one package' }];
+  writeFileSync(configPath, `${JSON.stringify({ ...config, workspaces }, null, 2)}\n`, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'chore: name the workspace filters']);
+  const applied = run(['apply', root, '--write']);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(configPath, 'utf8')).workspaces, workspaces);
+  const verified = run(['verify', root]);
+  assert.equal(verified.status, 0, verified.stdout + verified.stderr);
+});
+
+test('no shipped template and no flow step asks for an edit of a generated file [@invariant enforce-sdd.gates:V28]', () => {
+  const templates = join(SKILL_ROOT, 'assets', 'repository');
+  const files = readdirSync(templates, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith('.md'));
+  for (const entry of files) {
+    const path = join(entry.parentPath, entry.name);
+    assert.doesNotMatch(readFileSync(path, 'utf8'), /when you know the repository|update this table|here when you know/i, relative(templates, path));
+  }
+  const commit = readFileSync(join(templates, '_claude', 'skills', 'commit-changes', 'SKILL.md'), 'utf8');
+  assert.match(commit, /`workspaces` in `\.agent-sdd\/config\.json`/);
+  assert.match(readFileSync(join(templates, 'docs', 'app-config.md'), 'utf8').replace(/\s+/g, ' '), /`configGroups` in `\.agent-sdd\/config\.json`/);
+  const flow = readFileSync(join(SKILL_ROOT, 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+  assert.doesNotMatch(flow, /fill the [^.;]*(table|rows) in `(\.claude|docs)\//);
+  assert.match(flow, /`workspaces`/);
+});
+
+/** Writes "workspaces" into the config of an installed fixture. */
+function setWorkspaces(root, workspaces) {
+  const configPath = join(root, '.agent-sdd', 'config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  writeFileSync(configPath, `${JSON.stringify({ ...config, workspaces }, null, 2)}\n`, 'utf8');
+}
+
+test('check-sdd fails on a workspaces entry without prefix or filter and on a prefix that holds no file [@invariant enforce-sdd.gates:V28]', () => {
+  const root = installed();
+  setWorkspaces(root, [{ prefix: 'src/', filter: 'fixture', notes: '' }]);
+  assert.equal(gate(root).status, 0, gate(root).stderr);
+
+  setWorkspaces(root, [{ prefix: 'src/', filter: '' }, { filter: 'web' }, { prefix: 'apps/gone/', filter: 'gone' }]);
+  const checked = gate(root);
+  assert.equal(checked.status, 1);
+  assert.equal(checked.stderr.match(/invalid workspaces entry in \.agent-sdd\/config\.json/g).length, 2);
+  assert.match(checked.stderr, /workspaces entry "apps\/gone\/": no file is under this prefix/);
+
+  setWorkspaces(root, { prefix: 'src/' });
+  assert.match(gate(root).stderr, /"workspaces" in \.agent-sdd\/config\.json is not a list/);
+});
+
+test('check-docs warns on an empty workspaces list only when the repository has a workspace manifest [@invariant enforce-sdd.gates:V28]', () => {
+  const root = installed();
+  assert.doesNotMatch(docsGate(root).stdout, /"workspaces" is empty/);
+
+  writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "src"\n', 'utf8');
+  const warned = docsGate(root);
+  assert.equal(warned.status, 0, warned.stderr);
+  assert.match(warned.stdout, /\.agent-sdd\/config\.json: "workspaces" is empty, and pnpm-workspace\.yaml names workspaces/);
+
+  setWorkspaces(root, [{ prefix: 'src/', filter: 'fixture', notes: '' }]);
+  assert.doesNotMatch(docsGate(root).stdout, /"workspaces" is empty/);
+
+  setWorkspaces(root, []);
+  rmSync(join(root, 'pnpm-workspace.yaml'));
+  writeFileSync(join(root, 'package.json'), '{ "name": "fixture", "private": true, "workspaces": ["src"] }\n', 'utf8');
+  assert.match(docsGate(root).stdout, /"workspaces" is empty, and package\.json names workspaces/);
+});
+
+test('plan names the new home of the rows in a generated file that was edited or that the tool does not own [@invariant enforce-sdd.gates:V28]', () => {
+  const root = installed();
+  const skillPath = join(root, '.claude', 'skills', 'commit-changes', 'SKILL.md');
+  writeFileSync(skillPath, `${readFileSync(skillPath, 'utf8')}\n| \`src/\` | \`fixture\` | |\n`, 'utf8');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'docs: fill the old filter table']);
+  const kept = run(['plan', root]);
+  assert.equal(kept.status, 0, kept.stderr);
+  assert.match(kept.stdout, /keep\s+\.claude\/skills\/commit-changes\/SKILL\.md/);
+  assert.match(kept.stdout, /\.claude\/skills\/commit-changes\/SKILL\.md: edited after install[^\n]*move the rows of a workspace filter table to "workspaces" in \.agent-sdd\/config\.json/);
+
+  const unowned = fixture();
+  mkdirSync(join(unowned, 'docs'), { recursive: true });
+  writeFileSync(join(unowned, 'docs', 'agent-parity.md'), '# Agent parity\n\nOur own text.\n', 'utf8');
+  git(unowned, ['add', '.']);
+  git(unowned, ['commit', '-q', '-m', 'docs: own parity doc']);
+  const conflict = run(['plan', unowned]);
+  assert.match(conflict.stdout, /docs\/agent-parity\.md: the file already exists[^\n]*a rule of the repository needs no row in the rules index/);
 });

@@ -242,7 +242,7 @@ Options for `plan` and `apply`:
 | `--agents all` or `claude,codex,cursor` | Tools to configure. Default: all three. |
 | `--merge-agents` | Add the tool lines below the first heading of an existing `AGENTS.md` that lacks them. Read the file first. |
 | `--replace <path>[,<path>]` | Write the tool version of these tool-owned files, even if you edited them or they existed before install. They become tool-owned: upgrades update them and `uninstall` deletes them. |
-| `--allow-dirty` | Apply with uncommitted changes present. Not recommended, because you lose the clean one-diff review. |
+| `--allow-dirty` | Apply with uncommitted changes present. Not recommended, because you lose the clean one-diff review. An agent passes it only over changes it made itself in the same run, such as the `CLAUDE.md` move. |
 | `--write` | Write the files. Without it, `apply` is a dry run. |
 | `--json` | Machine-readable output (`plan`, `audit`, `verify`). |
 
@@ -305,7 +305,8 @@ the install change must move every item.
 `check-docs` prints warnings that never fail the gate, at most 20 lines: a history word (`no longer`,
 `used to`, `today`, `planned`) or a date in a doc of record, and a living doc whose name reads as a dated copy
 (`setup-old.md`, `setup-2025.md`, `setup.v1.md`, a file under `archive/`). A script can suspect these. Only a
-reader can decide them.
+reader can decide them. It also warns when `workspaces` in `.agent-sdd/config.json` is empty and the repository
+has `pnpm-workspace.yaml` or `workspaces` in its root `package.json`.
 
 `check-sdd` fails on:
 
@@ -357,6 +358,7 @@ resolve an explicit value, the gate fails. It does not silently check one commit
 | `exclude` | Names that the gates skip anywhere (`vendor`), or repo-relative prefixes (`apps/samples`). The gates always skip `.claude/worktrees`, because Claude Code worktrees are full repository copies. |
 | `configGroups` | For the `config` profile: `{ name, source, surfaces: [{ path, mode: "json" \| "text" }] }`. |
 | `helmCharts` | For the `helm` profile: the chart folders that contain `Chart.yaml`. |
+| `workspaces` | The map from path prefix to task-runner filter that the `commit-changes` skill reads: `{ prefix, filter, notes }`. Put it here, not in the skill file: `verify` fails on an edited generated file. |
 | `docsStandardLine` | One line that your docs standard asks every root `AGENTS.md` to carry. Empty by default. When it is set, `apply` adds the line to the root `AGENTS.md`, above the pointer line. `check-docs` then fails when the line is missing. |
 | `agents`, `profiles` | What was installed. The gate uses `agents` to decide which partners to require. |
 
@@ -388,6 +390,8 @@ Every message ends with what to do. The most frequent ones:
 | `says it supersedes this ADR, but the status does not name` (`check-docs`) | A later ADR supersedes this one, and the status of this one is silent. | Set `status: 'superseded by ADR-NNNN (<what>, <date>)'`, several joined with " and ". |
 | `restates what the source declares` (`check-docs`) | The Interfaces section of a doc of record has a `fn:` or `type:` line. | Delete the line. Write a rule about the function as an invariant. |
 | `unreachable API contract` | No Markdown file links the contract. | List it in the `README.md` of its `docs/` folder. |
+| `workspaces entry "<prefix>": no file is under this prefix` | A workspace moved or went, and its entry in `.agent-sdd/config.json` stayed. | Fix the `prefix`, or remove the entry. |
+| `invalid workspaces entry` | An entry of `workspaces` has no `prefix` or no `filter`. | Give each entry both. `notes` is optional. |
 | `module not covered: <folder>` (`check-docs`) | No doc of record covers a module folder under `moduleRoots`. | Write the doc per `docs/doc-of-record.md` and add its row to the `README.md` index of its `docs/` folder, in the same commit. |
 | `AGENTS.md does not link docs/doc-of-record.md` (`check-docs`) | The pointer line was removed from the root `AGENTS.md`. | Put the line back. Without it, agents skip the docs of record. |
 | `the repository ships AGENTS.md, never CLAUDE.md` (`check-docs`) | A `CLAUDE.md` is in the repository. | Move each line that `AGENTS.md` lacks into the `AGENTS.md` beside it. Then delete the `CLAUDE.md`. |

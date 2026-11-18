@@ -53,11 +53,14 @@ and the skill links the rules it applies.
 
 ## Rules index
 
+The rules that the tool ships with the selected profiles:
+
 | Rule | Scope | Concern doc | Trigger |
 |---|---|---|---|
 <!-- rules-index -->
 
-When you add, remove or rename a rule, update this table and the rule's adapter folder in the same
+A rule of the repository has no row here: its frontmatter holds its scope and its trigger, and
+`.claude/rules/` lists it. When you add, remove or rename a rule, change its adapter folder in the same
 commit. Then run `node scripts/gen-cursor-rules.mjs`. Run `node scripts/check-sdd.mjs` before handoff. The
 gate checks the links in both directions. It cannot check that an adapter means the same as its source, so
 keep adapters short.

@@ -441,6 +441,28 @@ function checkHelmConfig() {
   }
 }
 
+// "workspaces" maps a path prefix to a task-runner filter for the commit-changes skill. A stale prefix makes
+// that skill run no test for the folder, without an error, so the gate fails on it. An empty list is advice
+// in check-docs.
+function checkWorkspaces() {
+  const workspaces = config?.workspaces;
+  if (workspaces === undefined) return;
+  if (!Array.isArray(workspaces)) {
+    fail('"workspaces" in .agent-sdd/config.json is not a list. Write a list of { "prefix", "filter", "notes" } entries, or an empty list.');
+    return;
+  }
+  for (const entry of workspaces) {
+    const prefix = typeof entry?.prefix === 'string' ? entry.prefix.replaceAll('\\', '/').replace(/^\.?\//, '').replace(/\/+$/, '') : '';
+    if (!prefix || typeof entry?.filter !== 'string' || !entry.filter.trim()) {
+      fail('invalid workspaces entry in .agent-sdd/config.json: each entry needs "prefix" (the folder of the workspace) and "filter" (its task-runner filter).');
+      continue;
+    }
+    if (!allFiles.some((path) => path.startsWith(`${prefix}/`))) {
+      fail(`workspaces entry "${entry.prefix}": no file is under this prefix, so the commit-changes skill would run no test for it. Fix the prefix in .agent-sdd/config.json, or remove the entry.`);
+    }
+  }
+}
+
 const runtimeExtensions = new Set([
   '.c', '.cc', '.cjs', '.cpp', '.cs', '.go', '.h', '.hbs', '.java', '.js', '.json', '.json5', '.jsx', '.kt',
   '.mjs', '.php', '.proto', '.py', '.rb', '.rs', '.sql', '.tpl', '.ts', '.tsx', '.yaml', '.yml',
@@ -732,6 +754,7 @@ function main() {
   checkAgents();
   checkConfigGroups();
   checkHelmConfig();
+  checkWorkspaces();
   checkChangeImpact(args);
 
   if (problems.length) {

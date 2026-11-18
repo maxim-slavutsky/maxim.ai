@@ -451,6 +451,9 @@ function desiredFiles(root, profiles, agents) {
     exclude: current?.exclude ?? ['node_modules', 'dist', 'build', 'coverage', 'vendor'],
     configGroups: current?.configGroups ?? [],
     helmCharts: current?.helmCharts ?? [],
+    // The repository's map from path prefix to task-runner filter. The commit-changes skill reads it here,
+    // because a table inside the generated skill would make every repository edit a generated file.
+    workspaces: current?.workspaces ?? [],
     docsStandardLine: current?.docsStandardLine ?? '',
     // The standard the gates port: its name comes from the user, its version is the one these gates implement.
     docsStandard: { name: String(current?.docsStandard?.name ?? ''), version: STANDARD_VERSION },
@@ -697,6 +700,22 @@ function mapContent(root, agents) {
   return { action: 'merge', content: `${current.trimEnd()}\n\n${block}\n` };
 }
 
+/**
+ * Up to 1.0.0 four generated files asked the repository to write its own values into them. The tool version
+ * holds none, so a kept or unowned copy says where each value goes before the tool version replaces it.
+ */
+const REPOSITORY_VALUES_HOME = {
+  '.claude/skills/commit-changes/SKILL.md': 'move the rows of a workspace filter table to "workspaces" in .agent-sdd/config.json',
+  'docs/app-config.md': 'move the rows of a surfaces table to "configGroups" in .agent-sdd/config.json',
+  'docs/helm-validation.md': 'move the repository facts to the AGENTS.md nearest to each chart',
+  'docs/agent-parity.md': 'a rule of the repository needs no row in the rules index',
+};
+
+function valuesHome(path) {
+  const home = REPOSITORY_VALUES_HOME[path];
+  return home ? `The tool version keeps no value of the repository: ${home}. ` : '';
+}
+
 /** How to get the tool version of an edited generated file back. "git checkout" only helps before a commit. */
 function restoreAdvice(path) {
   return `To take the tool version back, run "apply <repo> --write --replace ${path}" (commit or discard other changes first).`;
@@ -748,14 +767,14 @@ function plan(root, profiles, agents, allowMerge = false, replace = []) {
         path,
         action: 'keep',
         content: null,
-        reason: `edited after install, so this upgrade skips it and your version stays. ${restoreAdvice(path)}`,
+        reason: `edited after install, so this upgrade skips it and your version stays. ${valuesHome(path)}${restoreAdvice(path)}`,
       });
     } else {
       actions.push({
         path,
         action: 'conflict',
         content: null,
-        reason: `the file already exists and was not created by this tool. Keep your version by moving it aside, drop the profile that ships it (--profiles), or adopt the tool version with "apply <repo> --write --replace ${path}" after comparing the two.`,
+        reason: `the file already exists and was not created by this tool. Keep your version by moving it aside, drop the profile that ships it (--profiles), or adopt the tool version with "apply <repo> --write --replace ${path}" after comparing the two.${valuesHome(path) ? ` ${valuesHome(path).trim()}` : ''}`,
       });
     }
   }
@@ -1317,7 +1336,8 @@ Things this tool cannot undo for you:
     console.log(`\nApplied enforce-sdd ${VERSION}. Next steps:
   1. Open .agent-sdd/config.json: make sure "runtimeRoots" lists the folders that hold application code,
      "moduleRoots" lists the folders whose children are modules that a doc of record covers (for example
-     "apps/*/src/modules"), and archived docs (old plans, samples) are in "exclude". Set "docsStandardLine"
+     "apps/*/src/modules"), and archived docs (old plans, samples) are in "exclude". List each workspace in
+     "workspaces" (path prefix and task-runner filter) for the commit-changes skill. Set "docsStandardLine"
      when your organization has a docs standard line for the root AGENTS.md, commit the config change, and run
      apply again (apply refuses a dirty tree).
   2. Run "audit <repo>" and move every old-format item it lists; the gates fail on each one.
