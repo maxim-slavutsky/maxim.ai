@@ -1408,6 +1408,20 @@ test('docs/map.md holds the rows the tool adds, in a block that merge and uninst
   assert.equal(readFileSync(join(root, 'docs', 'map.md'), 'utf8'), own);
 });
 
+test('the map block names the home of the docs index that check-docs demands [@invariant enforce-sdd.gates:V19]', () => {
+  const root = fixture();
+  assert.equal(run(['apply', root, '--write', '--agents', 'claude']).status, 0);
+  const block = readFileSync(join(root, 'docs', 'map.md'), 'utf8');
+  assert.match(block, /\| the index of the docs of record and the API contracts in one `docs\/` folder \| the `README\.md` of that folder/);
+});
+
+test('configuration.md claims no AGENTS.md check per workspace, because the gates have none', () => {
+  const body = readFileSync(join(SKILL_ROOT, 'references', 'configuration.md'), 'utf8').replace(/\s+/g, ' ');
+  assert.doesNotMatch(body, /demands an `AGENTS\.md` in every workspace/);
+  assert.match(body, /The gates ask for no `AGENTS\.md` in a workspace/);
+  assert.match(readFileSync(join(SKILL_ROOT, 'assets', 'repository', 'scripts', 'check-docs.mjs'), 'utf8'), /A workspace needs no AGENTS\.md of its own/);
+});
+
 /** docs/map.md and the manifest as an install under the former name sdd-enforce left them. */
 function formerNameInstalled() {
   const root = installed();

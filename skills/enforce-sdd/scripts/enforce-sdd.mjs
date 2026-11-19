@@ -676,6 +676,7 @@ function mapRows(agents) {
     '|---|---|---|---|',
     '| a gate script that a Git hook or CI runs | `scripts/check-docs.mjs` and `scripts/check-sdd.mjs`, with `scripts/sdd-lib.mjs`, configured in `.agent-sdd/config.json` | yes | by git and CI |',
     '| a commit already on a shared branch that fails a per-commit gate | one entry in `.agent-sdd/waivers.json`, with the full SHA and a reason | yes | by `check-sdd --changed` |',
+    '| the index of the docs of record and the API contracts in one `docs/` folder | the `README.md` of that folder, one link per doc. `check-docs` fails on a doc of record it does not link | yes | by a pointer from the nearest `AGENTS.md` |',
   ];
   if (agents.includes('codex') || agents.includes('cursor')) {
     rows.push('| the Codex and Cursor adapter of a rule or a skill | `.agents/skills/<name>/SKILL.md` and `agents/openai.yaml`, with the name of the rule or skill. It links the concern doc of the rule, or the Claude skill | yes | when its description matches |');

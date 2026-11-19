@@ -157,7 +157,8 @@ changes the file and not its owner needs a `Doc-Impact: none -` reason of 8 word
 The reason names each such file and is not generic. `Spec-Impact:` is accepted as the same trailer.
 
 V19: Apply writes the tool's map rows between `<!-- enforce-sdd:start -->` and `<!-- enforce-sdd:end -->` in
-`docs/map.md`. The rows follow the enabled agents. It creates the file, or merges the block into an existing file
+`docs/map.md`. The rows follow the enabled agents, and one row names the `README.md` index of a `docs/` folder,
+which `check-docs` demands. It creates the file, or merges the block into an existing file
 and keeps the rows outside it. Uninstall removes the block, and deletes the file only when install created it and
 only the block and the heading remain. A block between the `sdd-enforce` markers of the former name is the same
 block: apply rewrites it with the new markers, and uninstall removes it.

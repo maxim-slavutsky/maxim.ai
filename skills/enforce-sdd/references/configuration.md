@@ -91,9 +91,8 @@ Doc of record placement:
 A doc in `<workspace>/docs/` with a folder outside that workspace fails. Full shape: `docs/doc-of-record.md` in the
 target repository.
 
-`check-docs` also demands an `AGENTS.md` in every workspace: a direct child of a runtime root that carries a
-package manifest (`package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`,
-`Chart.yaml`).
+The gates ask for no `AGENTS.md` in a workspace: one with no gotcha and no pointer to hold has none. `check-sdd`
+fails on an `AGENTS.md` that no other Markdown file links.
 
 ### Config groups
 
